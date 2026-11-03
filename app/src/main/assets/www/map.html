@@ -22,13 +22,18 @@
   .v{font-size:16px;color:#6cf}
   .v.small{font-size:13px;color:#adf}
   button{background:#248;color:#fff;border:0;border-radius:6px;padding:8px 14px;
-         cursor:pointer;font-family:monospace;font-size:13px;margin-right:6px}
+         cursor:pointer;font-family:monospace;font-size:13px;margin-right:6px;margin-bottom:6px}
   button:active{background:#369}
+  button.green{background:#285}
+  button.orange{background:#a63}
   button.red{background:#833}
+  button:disabled{background:#333;color:#777;cursor:not-allowed;opacity:0.7}
   .hint{color:#8aa;font-size:11px;margin-top:6px;line-height:1.6}
   .hint code{color:#adf;background:#0e1418;padding:1px 4px;border-radius:3px}
   .warn{color:#fca;font-size:12px;margin-top:6px;background:#221408;
         padding:6px 8px;border-radius:4px;border-left:3px solid #fa4}
+  .ok{color:#cfc;font-size:12px;margin-top:6px;background:#1c4a2c;
+      padding:6px 8px;border-radius:4px;border-left:3px solid #3c3}
   #mapCanvas{width:100%;height:60vh;min-height:400px;max-height:700px;
              background:#0b0f12;border-radius:6px;display:block;
              touch-action:none;cursor:grab}
@@ -44,6 +49,12 @@
   .conn.on{color:#3c6;border:1px solid #3c6}
   .conn.off{color:#f88;border:1px solid #f88}
   .conn.pending{color:#fc8;border:1px solid #fc8}
+  .calibRow{background:#0e1418;border-radius:6px;padding:10px;margin:10px 0}
+  .calibRow .dur{background:#182028;color:#e6f0f4;border:1px solid #234;
+                 border-radius:4px;padding:6px 8px;width:80px;
+                 font-family:monospace;font-size:13px}
+  .calibBar{height:8px;background:#234;border-radius:4px;margin-top:8px;overflow:hidden}
+  .calibBar .fill{height:100%;background:#3c6;transition:width 0.15s linear}
 </style>
 </head>
 <body>
@@ -82,10 +93,48 @@
             <label><input type="checkbox" id="invertRotation"> Инвертировать поворот</label>
         </div>
 
+        <!-- ============================================================ -->
+        <!-- КАЛИБРОВКА ПОКОЯ / НОЛЬ                                       -->
+        <!-- ============================================================ -->
+        <div class="calibRow">
+            <div class="row" style="margin-bottom:6px">
+                <label style="color:#adf;font-size:12px;display:flex;align-items:center;gap:6px">
+                    Длительность калибровки:
+                    <input id="calibDurationSec" type="number" min="5" max="60" step="1"
+                           class="dur" value="5">
+                    сек (5–60)
+                </label>
+            </div>
+            <div class="row">
+                <button class="green" onclick="doZero()" id="btnZero">🎯 Установить ноль</button>
+                <button class="orange" onclick="doCalib(true)" id="btnCalibZero">
+                    ⏱ Калибровать + ноль</button>
+                <button onclick="doCalib(false)" id="btnCalibOnly">
+                    ⏱ Только калибровка</button>
+                <button class="red" onclick="doResetPos()">↺ Сброс накопления</button>
+            </div>
+            <div id="calibStatusLine" style="margin-top:8px;color:#8aa;font-size:12px">
+                Калибровка: <span id="calibState">не откалибровано</span>
+                <span id="calibRemain"></span>
+            </div>
+            <div class="calibBar" id="calibProgBar" style="display:none">
+                <div class="fill" id="calibFill" style="width:0%"></div>
+            </div>
+            <div id="calibDetails" style="margin-top:6px;color:#8aa;font-size:11px">—</div>
+            <div class="hint" style="margin-top:6px">
+                <b>🎯 Установить ноль</b> — мгновенно: текущее положение становится (0,0).<br>
+                <b>⏱ Калибровать + ноль</b> — замер шума <b>N секунд</b> (поле выше),
+                затем установка нуля. <b>Не двигайте прибор во время замера!</b>
+                После калибровки скорректированы <code>posBiasX/Y</code> и
+                <code>posDeadbandPx</code> (3.5σ) — позиция не уплывает в покое.<br>
+                <b>↺ Сброс накопления</b> — обнуляет и позицию, и точку отсчёта,
+                очищает след на карте.
+            </div>
+        </div>
+
         <div class="controls">
             <button onclick="resetView()">⤢ Авто-масштаб</button>
             <button onclick="centerOnDevice()">🎯 Центрировать</button>
-            <button class="red" onclick="doResetPos()">↺ Сброс позиции и поворота</button>
             <label>Zoom:
                 <input type="range" id="zoomSlider" min="0.2" max="15" step="0.1" value="2">
                 <span id="zoomVal">2.0×</span>
@@ -102,13 +151,11 @@
             <span>↑ «вперёд» · → «вправо»</span>
         </div>
 
-        <div class="hint">
-            <b>Транспорт:</b> первый запрос — <code>GET /api/sensor/map</code> (полный снапшот
-            с трейлом). Дальше — только <code>event: reading</code> из SSE, по одному событию
-            на каждое изменение положения. Пока прибор неподвижен, данные <b>не идут</b>
-            (только <code>event: ping</code> ~50 байт каждые 15 с). При разрыве SSE —
-            авто-reconnect + refetch. Если SSE не поднялся за 3 попытки — fallback
-            на Ajax-polling каждые 500 мс.<br>
+        <div class="hint" style="margin-top:10px">
+            <b>Транспорт:</b> первый запрос — <code>GET /api/sensor/map</code> (полный
+            снапшот с трейлом). Дальше — только <code>event: reading</code> из SSE,
+            по одному событию на каждое изменение положения. Пока прибор неподвижен,
+            данные <b>не идут</b> (только <code>event: ping</code> ~50 байт каждые 15 с).<br>
             <b>Оси:</b> «вперёд» — вверх, «вправо» — вправо. Если направление всё ещё
             неверное — проверьте в Настройках <code>cameraMountRotationDeg</code>,
             <code>invertDx</code>, <code>invertDy</code>.<br>
@@ -141,21 +188,14 @@
 
   // ============================================================
   // ОСИ: серверные posX/posY → мировые mapX/mapY
-  //
-  // Из наблюдений на устройстве:
-  //   posX > 0  когда прибор двигают ВЛЕВО
-  //   posY > 0  когда прибор двигают НАЗАД (к себе)
-  //
-  // Хотим стандарт: «вперёд» = вверх (mapY+), «вправо» = вправо (mapX+):
-  //   mapX = -posX
-  //   mapY = -posY
+  //   posX+ = вправо, posY+ = вперёд (исправлено на сервере)
   // ============================================================
-    function serverToMap(posX, posY) {
-        return { x: posX, y: posY };
-    }
-    function trailPointToMap(tp) {
-        return { x: tp.x, y: tp.y, rot: tp.rot || 0, t: tp.t };
-    }
+  function serverToMap(posX, posY) {
+    return { x: posX, y: posY };
+  }
+  function trailPointToMap(tp) {
+    return { x: tp.x, y: tp.y, rot: tp.rot || 0, t: tp.t };
+  }
 
   // ============================================================
   // World → Screen (с флипом Y — «вверх» на экране = «вверх» в мире)
@@ -438,7 +478,7 @@
   }, {passive:false});
 
   // ============================================================
-  // Кнопки
+  // Кнопки масштаба
   // ============================================================
   function resetView() {
     view.autoFit = true;
@@ -452,35 +492,9 @@
     view.offsetY = m.y;
     render();
   }
-  function doResetPos() {
-    if (!confirm('Сбросить позицию, поворот и след?')) return;
-    var xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/sensor/reset', true);
-    xhr.onload = function() {
-      // мгновенно чистим клиентское состояние — не ждём GET /map
-      trail = [];
-      if (mapState) {
-        mapState.x_px = 0;
-        mapState.y_px = 0;
-        mapState.rotation_deg = 0;
-        mapState.trail_count = 0;
-      }
-      lastZeroAt = -1;   // форсируем refetch при первом SSE-событии
-      updateCounters();
-      render();
-      fetchFullSnapshot();
-    };
-    xhr.onerror = function() {
-      showBanner('Ошибка сети при сбросе позиции');
-    };
-    xhr.send();
-}
-  function forceFullRefresh() {
-    fetchFullSnapshot();
-  }
 
   // ============================================================
-  // Загрузка
+  // Загрузка /api/sensor/map
   // ============================================================
   var readyForDeltas = false;
   var pendingReadings = [];
@@ -491,10 +505,11 @@
   var lastZeroAt     = -1;
   var lastPublishReason = '';
 
-  function showBanner(text) {
+  function showBanner(text, cls) {
     var b = $('banner');
     if (!text) { b.style.display = 'none'; return; }
     b.style.display = '';
+    b.className = cls || 'warn';
     b.textContent = text;
   }
 
@@ -512,11 +527,11 @@
           fullFetches++;
           readyForDeltas = true;
           showBanner(null);
-          // применяем накопленные дельты, пришедшие до получения снапшота
           while (pendingReadings.length) {
             applyReading(pendingReadings.shift());
           }
           updateCounters();
+          updateCalibFromState(st);
           render();
           if (callback) callback(true);
           return;
@@ -547,7 +562,7 @@
   // SSE: приём дельт
   // ============================================================
   var sseConn      = null;
-  var sseState     = 'idle';   // idle | connecting | open | error | fallback
+  var sseState     = 'idle';
   var sseAttempts  = 0;
   var sseConnectTimer = null;
 
@@ -557,7 +572,7 @@
     var pos = reading.position;
     var zeroAt = pos.zero_set_at_ms || 0;
 
-    // Ноль сменился → старые точки трейла стали «смещены» — синхронизируемся
+    // Смена нуля (setZero или calibration+zero) → полный refetch
     if (lastZeroAt >= 0 && zeroAt !== lastZeroAt) {
       lastZeroAt = zeroAt;
       fetchFullSnapshot();
@@ -609,7 +624,6 @@
     }
     sseConn = es;
 
-    // если 6 сек не пришло onopen → fallback
     sseConnectTimer = setTimeout(function() {
       if (sseState !== 'open') {
         try { es.close(); } catch (e) {}
@@ -633,7 +647,6 @@
     });
 
     es.addEventListener('ping', function() {
-      // heartbeat — просто обновляем «последний раз слышали сервер»
       lastEventMs = Date.now();
       updateStatus();
     });
@@ -661,7 +674,7 @@
   }
 
   // ============================================================
-  // Fallback: Ajax-polling (только если SSE не поднялся)
+  // Fallback: Ajax-polling
   // ============================================================
   var fallbackTimer = null;
   function startFallbackPolling() {
@@ -735,8 +748,204 @@
     $('stReason').textContent = lastPublishReason || '—';
   }
 
-  // обновлять статус «N с назад» каждую секунду
+  function updateCalibFromState(st) {
+    // server status может содержать calib, но /map его не включает.
+    // Заполняем только то, что известно из /map.
+    $('calibState').textContent =
+        st.calibrated ? '✓ откалибровано' : 'не откалибровано';
+    var det = 'deadband = ' + ((st.deadband_px || 0).toFixed(3)) + ' px';
+    if (typeof st.rot_deadband_deg === 'number') {
+      det += ' · rotDeadband = ' + st.rot_deadband_deg.toFixed(2) + '°';
+    }
+    $('calibDetails').textContent = det;
+  }
+
   setInterval(updateStatus, 1000);
+
+  // ============================================================
+  // КАЛИБРОВКА
+  // ============================================================
+  var calibPollTimer = null;
+
+  function doZero() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/zero', true);
+    xhr.onload = function() {
+      try {
+        var j = JSON.parse(xhr.responseText);
+        if (j && j.ok) {
+          showBanner('Ноль установлен: X=0, Y=0', 'ok');
+          setTimeout(function(){ showBanner(null); }, 2500);
+          // форсируем полный refetch — трейл и позиция в новой системе
+          lastZeroAt = -1;
+          fetchFullSnapshot();
+        }
+      } catch (e) {}
+    };
+    xhr.onerror = function() { showBanner('Ошибка сети при установке нуля'); };
+    xhr.send();
+  }
+
+  function doCalib(thenZero) {
+    var dur = parseInt($('calibDurationSec').value, 10);
+    if (isNaN(dur) || dur < 5) dur = 5;
+    if (dur > 60) dur = 60;
+
+    if (!confirm((thenZero
+            ? 'Калибровка покоя + установка нуля.\n\n'
+            : 'Калибровка покоя (без установки нуля).\n\n')
+            + 'Длительность: ' + dur + ' сек.\n'
+            + 'Не двигайте прибор во время замера.')) return;
+
+    setCalibButtonsEnabled(false);
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/calib/start', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onload = function() {
+      try {
+        var j = JSON.parse(xhr.responseText);
+        if (j && j.ok) {
+          showBanner('Калибровка ' + dur + ' сек… не двигайте прибор', 'warn');
+          if (j.calib) renderCalib(j.calib);
+        } else if (j && j.calib && j.calib.status === 'error_sensor_stopped') {
+          showBanner('Камера остановлена — запустите сенсор.', 'warn');
+          setCalibButtonsEnabled(true);
+          return;
+        }
+      } catch (e) {}
+      pollCalib(thenZero);
+    };
+    xhr.onerror = function() {
+      showBanner('Ошибка сети при калибровке');
+      setCalibButtonsEnabled(true);
+    };
+    xhr.send(JSON.stringify({thenZero: !!thenZero, durationSec: dur}));
+  }
+
+  function pollCalib(thenZero) {
+    if (calibPollTimer) return;
+    var startTime = Date.now();
+    calibPollTimer = setInterval(function() {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/sensor/calib/status', true);
+      xhr.onload = function() {
+        try {
+          var j = JSON.parse(xhr.responseText);
+          if (!j || !j.calib) return;
+          renderCalib(j.calib);
+
+          var st = j.calib.status;
+          if (st === 'done' || st === 'aborted_motion'
+                  || st === 'error_too_few' || st === 'error_sensor_stopped') {
+            clearInterval(calibPollTimer);
+            calibPollTimer = null;
+            setCalibButtonsEnabled(true);
+
+            if (st === 'done') {
+              showBanner('Калибровка завершена' + (thenZero
+                      ? ', ноль установлен' : ''), 'ok');
+              setTimeout(function(){ showBanner(null); }, 3500);
+              // после done + thenZero меняется zero_set_at_ms → refetch
+              // (даже без thenZero — обновим deadband, calibrated)
+              lastZeroAt = -1;
+              fetchFullSnapshot();
+            } else if (st === 'aborted_motion') {
+              showBanner('Прервано: было движение. Повторите.', 'warn');
+            } else if (st === 'error_sensor_stopped') {
+              showBanner('Камера остановлена.', 'warn');
+            } else {
+              showBanner('Мало сэмплов. Повторите.', 'warn');
+            }
+          }
+          if (Date.now() - startTime > 70000) {
+            clearInterval(calibPollTimer);
+            calibPollTimer = null;
+            setCalibButtonsEnabled(true);
+          }
+        } catch (e) {}
+      };
+      xhr.send();
+    }, 250);
+  }
+
+  function renderCalib(c) {
+    if (!c) return;
+    var st = c.status || 'idle';
+    if (st === 'sampling') {
+      var pct = Math.round(100 * (c.progress || 0));
+      if (pct > 100) pct = 100;
+      if (pct < 0) pct = 0;
+      $('calibProgBar').style.display = '';
+      $('calibFill').style.width = pct + '%';
+      $('calibState').textContent = '⏱ замер ' + pct + '%';
+      var rem = c.remainSec || 0;
+      $('calibRemain').textContent = rem > 0
+              ? ' (осталось ~' + rem.toFixed(1) + ' с)'
+              : '';
+    } else {
+      $('calibProgBar').style.display = 'none';
+      $('calibRemain').textContent = '';
+      if (st === 'done') {
+        $('calibState').textContent = '✓ калибровка применена';
+      } else if (st === 'aborted_motion') {
+        $('calibState').textContent = '✗ прервано: движение';
+      } else if (st === 'error_too_few') {
+        $('calibState').textContent = '✗ мало сэмплов';
+      } else if (st === 'error_sensor_stopped') {
+        $('calibState').textContent = '✗ камера остановлена';
+      } else if (st === 'idle') {
+        $('calibState').textContent = 'не откалибровано';
+      } else {
+        $('calibState').textContent = st;
+      }
+    }
+
+    var det = '';
+    det += 'bias X = ' + (c.posBiasX||0).toFixed(3) + ' px, '
+         + 'bias Y = ' + (c.posBiasY||0).toFixed(3) + ' px · ';
+    det += 'deadband = ' + (c.posDeadbandPx||0).toFixed(3) + ' px · ';
+    det += 'samples: ' + (c.samples||0) + '/' + (c.minSamples||30);
+    $('calibDetails').textContent = det;
+
+    // подставить duration из конфига, если пользователь не менял
+    if (typeof c.durationSec === 'number'
+            && !$('calibDurationSec').dataset.touched) {
+      $('calibDurationSec').value = c.durationSec;
+    }
+  }
+
+  function setCalibButtonsEnabled(en) {
+    $('btnZero').disabled     = !en;
+    $('btnCalibZero').disabled = !en;
+    $('btnCalibOnly').disabled = !en;
+  }
+
+  function doResetPos() {
+    if (!confirm('Сбросить позицию, поворот и след?')) return;
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/reset', true);
+    xhr.onload = function() {
+      // мгновенно чистим локально
+      trail = [];
+      if (mapState) {
+        mapState.x_px = 0;
+        mapState.y_px = 0;
+        mapState.rotation_deg = 0;
+        mapState.trail_count = 0;
+      }
+      lastZeroAt = -1;
+      updateCounters();
+      render();
+      fetchFullSnapshot();
+    };
+    xhr.onerror = function() { showBanner('Ошибка сети при сбросе'); };
+    xhr.send();
+  }
+
+  function forceFullRefresh() {
+    fetchFullSnapshot();
+  }
 
   // ============================================================
   // UI handlers
@@ -752,10 +961,16 @@
   $('showAxes').addEventListener('change', render);
   $('invertRotation').addEventListener('change', render);
 
+  $('calibDurationSec').addEventListener('input', function() {
+    this.dataset.touched = '1';
+  });
+
   window.resetView        = resetView;
   window.centerOnDevice   = centerOnDevice;
   window.doResetPos       = doResetPos;
   window.forceFullRefresh = forceFullRefresh;
+  window.doZero           = doZero;
+  window.doCalib          = doCalib;
 
   window.addEventListener('resize', resizeCanvas);
 
@@ -764,6 +979,22 @@
   // ============================================================
   resizeCanvas();
   fetchFullSnapshot();
+
+  // попутно подтянем текущее состояние калибровки из /api/sensor/status
+  // (одноразово, чтобы поле duration подставилось из конфига)
+  (function fetchCalibStatusOnce() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/sensor/calib/status', true);
+    xhr.onload = function() {
+      if (xhr.status !== 200) return;
+      try {
+        var j = JSON.parse(xhr.responseText);
+        if (j && j.calib) renderCalib(j.calib);
+      } catch (e) {}
+    };
+    xhr.send();
+  })();
+
   connectSse();
 })();
 </script>
