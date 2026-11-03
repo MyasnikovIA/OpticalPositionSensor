@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#101418"
+    android:keepScreenOn="true">
+
+    <!-- Основной экран: живой поток + JSON -->
+    <WebView
+        android:id="@+id/webLive"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <!-- Экран настроек: WebView с /config.html -->
+    <WebView
+        android:id="@+id/webSettings"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <!-- Переключатель: ⚙ / ✕ -->
+    <Button
+        android:id="@+id/btnToggle"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="16dp"
+        android:text="⚙"
+        android:textSize="24sp"
+        android:background="#248"
+        android:textColor="#ffffff"
+        android:visibility="gone" />
+
+    <!-- Пока сервер стартует -->
+    <LinearLayout
+        android:id="@+id/loadingPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="24dp">
+
+        <ProgressBar
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:id="@+id/loadingText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:textColor="#8af"
+            android:text="Запуск сервиса…" />
+
+        <Button
+            android:id="@+id/grantPermBtn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Разрешить камеру"
+            android:visibility="gone" />
+    </LinearLayout>
+
+</FrameLayout>

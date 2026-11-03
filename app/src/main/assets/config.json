@@ -1,0 +1,43 @@
+{
+  "http": {
+    "port": 8080,
+    "host": "0.0.0.0"
+  },
+  "sensor": {
+    "enabled": true,
+    "autoStart": true,
+    "serverEnabled": true,
+    "restEnabled": true,
+    "sseEnabled": true,
+    "wsEnabled": true,
+    "wsPort": 8090,
+    "telnetEnabled": false,
+    "telnetPort": 8091,
+    "clientEnabled": false,
+    "clientProtocol": "http",
+    "clientServerUrl": "",
+    "clientPath": "/api/sensor/push",
+    "clientToken": "",
+    "clientIntervalMs": 100,
+    "targetWidth": 112,
+    "searchRadius": 4,
+    "blockSize": 8,
+    "minContrast": 3,
+    "maxSadPx": 18,
+    "flashlightMode": "off",
+    "lightThreshold": 50,
+    "cameraPreviewEnabled": true,
+    "cameraPreviewFps": 5,
+    "cameraPreviewQuality": 50,
+    "cameraPreviewRotation": 90,
+    "publishOnlyOnChange": true,
+    "publishMotionThresholdPx": 0.4,
+    "publishRotationThresholdDeg": 0.2,
+    "publishHeartbeatMs": 5000,
+    "cameraMountRotationDeg": 0,
+    "invertDx": false,
+    "invertDy": true,
+    "configUser": "admin",
+    "configPass": "admin"
+  }
+}

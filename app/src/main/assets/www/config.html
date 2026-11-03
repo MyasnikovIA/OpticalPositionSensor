@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Настройки — OpticalPositionSensor</title>
+    <style>
+  body{margin:0;background:#101418;color:#e6f0f4;font:14px/1.4 monospace;padding:0}
+  header{background:#182028;padding:10px 14px;display:flex;justify-content:space-between;
+         align-items:center;flex-wrap:wrap;gap:8px}
+  header h1{font-size:15px;margin:0;color:#6cf}
+  header nav a{color:#6cf;text-decoration:none;margin-left:8px;padding:4px 10px;
+               border-radius:4px;border:1px solid #234}
+  header nav a.active{background:#248;border-color:#248;color:#fff}
+  main{padding:12px}
+  .card{background:#182028;border-radius:8px;padding:12px;margin-bottom:12px}
+  .card h2{font-size:14px;margin:0 0 10px;color:#adf}
+  label{display:block;margin:8px 0 4px;color:#adf;font-size:12px}
+  label.inline{display:flex;align-items:center;gap:6px;color:#e6f0f4;
+               font-size:13px;margin:6px 0}
+  label.inline input{width:auto;margin:0}
+  input,select{background:#0e1418;color:#e6f0f4;border:1px solid #234;border-radius:4px;
+               padding:6px 8px;width:100%;box-sizing:border-box;font-family:monospace;
+               font-size:13px}
+  button{background:#248;color:#fff;border:0;border-radius:6px;padding:8px 14px;
+         cursor:pointer;font-family:monospace;font-size:13px;margin:8px 6px 0 0}
+  button:active{background:#369}
+  button.green{background:#285}
+  button.red{background:#833}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .row > div{flex:1;min-width:120px}
+  pre{white-space:pre-wrap;word-break:break-all;background:#0e1418;padding:8px;
+      border-radius:6px;font-size:11px;max-height:220px;overflow:auto;color:#8aa}
+  .hint{color:#8aa;font-size:11px;margin-top:4px}
+  .warn{color:#fca;font-size:12px;margin-top:6px;background:#221408;
+        padding:6px 8px;border-radius:4px;border-left:3px solid #fa4}
+</style>
+</head>
+<body>
+<header>
+    <h1>Настройки</h1>
+    <nav>
+        <a href="index.html">Информация</a>
+        <a href="sensor.html">Live</a>
+        <a href="config.html" class="active">Настройки</a>
+    </nav>
+</header>
+<main>
+
+    <!-- ============== Авторизация ============== -->
+    <div class="card">
+        <h2>Авторизация</h2>
+        <label>Логин</label>
+        <input id="user" value="admin">
+        <label>Пароль</label>
+        <input id="pass" type="password" value="admin">
+        <div class="hint">По умолчанию: admin / admin</div>
+    </div>
+
+    <!-- ============== Основное ============== -->
+    <div class="card">
+        <h2>Основное</h2>
+        <label class="inline"><input type="checkbox" id="enabled"> Датчик включён</label>
+        <label class="inline"><input type="checkbox" id="autoStart"> Запускать автоматически при старте</label>
+    </div>
+
+    <!-- ============== Серверы ============== -->
+    <div class="card">
+        <h2>Серверы (принимать подключения)</h2>
+        <div class="row">
+            <div><label>HTTP-порт</label><input id="httpPort" type="number" min="1" max="65535"></div>
+            <div><label>WS-порт</label><input id="wsPort" type="number" min="1" max="65535"></div>
+            <div><label>Telnet-порт</label><input id="telnetPort" type="number" min="1" max="65535"></div>
+        </div>
+        <div class="hint" id="portInfo" style="margin-bottom:8px">—</div>
+        <button class="red" onclick="applyHttpPort()">Применить HTTP-порт и перезапустить</button>
+        <div class="warn" id="portWarn" style="display:none"></div>
+        <label class="inline" style="margin-top:10px"><input type="checkbox" id="restEnabled"> REST</label>
+        <label class="inline"><input type="checkbox" id="sseEnabled"> SSE (Server-Sent Events)</label>
+        <label class="inline"><input type="checkbox" id="wsEnabled"> WebSocket-сервер</label>
+        <label class="inline"><input type="checkbox" id="telnetEnabled"> Telnet-сервер</label>
+        <div class="hint">Изменение WS / Telnet портов применяется после полного перезапуска приложения.</div>
+    </div>
+
+    <!-- ============== Клиентский режим (push) ============== -->
+    <div class="card">
+        <h2>Клиентский режим (отправка данных на сервер)</h2>
+        <label class="inline"><input type="checkbox" id="clientEnabled"> Включить отправку на удалённый сервер</label>
+        <label>Протокол</label>
+        <select id="clientProtocol">
+            <option value="http">HTTP (REST POST)</option>
+            <option value="ws">WebSocket</option>
+            <option value="telnet">Telnet / TCP</option>
+        </select>
+        <label>URL сервера</label>
+        <input id="clientServerUrl" placeholder="http://192.168.1.10:8080">
+        <label>Путь (для HTTP)</label>
+        <input id="clientPath" placeholder="/api/sensor/push">
+        <label>Bearer-токен (опционально)</label>
+        <input id="clientToken" placeholder="">
+        <label>Интервал отправки, мс</label>
+        <input id="clientIntervalMs" type="number" min="10" max="60000">
+    </div>
+
+    <!-- ============== Фонарик ============== -->
+    <div class="card">
+        <h2>Фонарик</h2>
+        <label>Режим фонарика</label>
+        <select id="flashlightMode">
+            <option value="off">Выключен</option>
+            <option value="on">Включён</option>
+            <option value="auto">Авто (по датчику освещённости)</option>
+        </select>
+        <label>Порог освещённости для авто, lx</label>
+        <input id="lightThreshold" type="number" min="0" max="10000">
+        <div class="hint">Фонарик включается через режим TORCH камеры. На некоторых прошивках не поддерживается.</div>
+    </div>
+
+    <!-- ============== Превью с камеры (MJPEG) ============== -->
+    <div class="card">
+        <h2>Превью с камеры (MJPEG)</h2>
+        <label class="inline"><input type="checkbox" id="cameraPreviewEnabled">
+            Включить превью (MJPEG / snapshot)</label>
+        <div class="row">
+            <div>
+                <label>FPS</label>
+                <input id="cameraPreviewFps" type="number" min="1" max="15">
+            </div>
+            <div>
+                <label>Качество JPEG (10–95)</label>
+                <input id="cameraPreviewQuality" type="number" min="10" max="95">
+            </div>
+        </div>
+        <label>Поворот картинки с камеры</label>
+        <select id="cameraPreviewRotation">
+            <option value="0">0° (как есть)</option>
+            <option value="90">90° вправо (по часовой)</option>
+            <option value="180">180° (вверх ногами)</option>
+            <option value="270">270° (90° влево)</option>
+        </select>
+        <div class="hint">
+            Применяется на сервере до отправки клиенту. Влияет на
+            <code>/api/sensor/stream.mjpg</code> и <code>/api/sensor/snapshot.jpg</code>.
+        </div>
+    </div>
+
+    <!-- ============== Ориентация осей ============== -->
+    <div class="card">
+        <h2>Ориентация осей</h2>
+        <div class="hint" style="margin-bottom:8px">
+            Для сценария «телефон плашмя, камера смотрит вниз»:<br>
+            вправо = +dx, вперёд = +dy → поворот 0°, инверсия X = off, инверсия Y = on.
+        </div>
+        <label>Поворот вектора движения (по часовой)</label>
+        <select id="cameraMountRotationDeg">
+            <option value="0">0° — верх телефона «вперёд»</option>
+            <option value="90">90° — правый край «вперёд»</option>
+            <option value="180">180° — низ телефона «вперёд»</option>
+            <option value="270">270° — левый край «вперёд»</option>
+        </select>
+        <label class="inline"><input type="checkbox" id="invertDx"> Инвертировать X</label>
+        <label class="inline"><input type="checkbox" id="invertDy"> Инвертировать Y</label>
+        <div class="hint">
+            Применяется к dx_px, dy_px, distance_px, direction_deg в JSON.
+            Не влияет на картинку (для неё — параметр «Поворот картинки с камеры»).
+        </div>
+    </div>
+
+    <!-- ============== Фильтр публикации JSON ============== -->
+    <div class="card">
+        <h2>Публикация JSON</h2>
+        <label class="inline">
+            <input type="checkbox" id="publishOnlyOnChange">
+            Отправлять JSON только при изменении положения
+        </label>
+        <div class="row">
+            <div>
+                <label>Порог смещения, px (|dx| или |dy|)</label>
+                <input id="publishMotionThresholdPx" type="number" step="0.05" min="0" max="100">
+            </div>
+            <div>
+                <label>Порог поворота, °</label>
+                <input id="publishRotationThresholdDeg" type="number" step="0.01" min="0" max="180">
+            </div>
+        </div>
+        <label>Heartbeat, мс (0 = выключить)</label>
+        <input id="publishHeartbeatMs" type="number" min="0" max="600000">
+        <div class="hint">
+            Изменения меньше указанных порогов считаются «шумом» и не публикуются.
+            Изменение фонарика и первый кадр публикуются всегда.
+            Heartbeat раз в N мс гарантирует, что клиент знает: связь жива.
+        </div>
+    </div>
+
+    <!-- ============== Параметры optical flow ============== -->
+    <div class="card">
+        <h2>Параметры оптического потока</h2>
+        <div class="row">
+            <div>
+                <label>targetWidth, px</label>
+                <input id="targetWidth" type="number" min="32" max="512">
+            </div>
+            <div>
+                <label>searchRadius, px</label>
+                <input id="searchRadius" type="number" min="1" max="16">
+            </div>
+            <div>
+                <label>blockSize, px</label>
+                <input id="blockSize" type="number" min="4" max="32">
+            </div>
+        </div>
+        <div class="row">
+            <div>
+                <label>minContrast</label>
+                <input id="minContrast" type="number" min="0" max="64">
+            </div>
+            <div>
+                <label>maxSadPx</label>
+                <input id="maxSadPx" type="number" min="1" max="255">
+            </div>
+        </div>
+        <div class="hint">Изменение этих параметров применяется при следующем запуске камеры (Стоп → Старт).</div>
+    </div>
+
+    <!-- ============== Смена логина/пароля ============== -->
+    <div class="card">
+        <h2>Сменить доступ к настройкам</h2>
+        <label>Новый логин</label>
+        <input id="newUser" placeholder="оставьте пустым, чтобы не менять">
+        <label>Новый пароль</label>
+        <input id="newPass" type="password" placeholder="оставьте пустым, чтобы не менять">
+        <div class="hint">После смены перелогиньтесь на этой странице.</div>
+    </div>
+
+    <!-- ============== Кнопки и вывод ============== -->
+    <div class="card">
+        <button onclick="loadCfg()">Загрузить</button>
+        <button class="green" onclick="saveCfg()">Сохранить</button>
+        <button class="red" onclick="restartSensor()">Перезапустить камеру</button>
+        <pre id="out">—</pre>
+    </div>
+
+</main>
+<script>
+(function() {
+  var $ = function(id){ return document.getElementById(id); };
+
+  function basicAuth() {
+    return 'Basic ' + btoa($('user').value + ':' + $('pass').value);
+  }
+
+  // ------------------------------------------------------------
+  // Применение конфига к форме
+  // ------------------------------------------------------------
+  function applyForm(c) {
+    ['enabled', 'autoStart', 'restEnabled', 'sseEnabled', 'wsEnabled',
+     'telnetEnabled', 'clientEnabled', 'cameraPreviewEnabled',
+     'publishOnlyOnChange', 'invertDx', 'invertDy']
+      .forEach(function(k) {
+        if (k in c) {
+          var el = $(k);
+          if (el) el.checked = !!c[k];
+        }
+      });
+
+    ['httpPort', 'wsPort', 'telnetPort',
+     'clientProtocol', 'clientServerUrl', 'clientPath', 'clientToken',
+     'clientIntervalMs',
+     'flashlightMode', 'lightThreshold',
+     'cameraPreviewFps', 'cameraPreviewQuality', 'cameraPreviewRotation',
+     'cameraMountRotationDeg',
+     'publishMotionThresholdPx', 'publishRotationThresholdDeg',
+     'publishHeartbeatMs',
+     'targetWidth', 'searchRadius', 'blockSize', 'minContrast', 'maxSadPx']
+      .forEach(function(k) {
+        if (k in c) {
+          var el = $(k);
+          if (el) el.value = c[k];
+        }
+      });
+  }
+
+  function readForm() {
+    var payload = {
+      enabled:         $('enabled').checked,
+      autoStart:       $('autoStart').checked,
+
+      restEnabled:     $('restEnabled').checked,
+      sseEnabled:      $('sseEnabled').checked,
+      wsEnabled:       $('wsEnabled').checked,
+      wsPort:          parseInt($('wsPort').value, 10) || 8090,
+      telnetEnabled:   $('telnetEnabled').checked,
+      telnetPort:      parseInt($('telnetPort').value, 10) || 8091,
+
+      clientEnabled:    $('clientEnabled').checked,
+      clientProtocol:   $('clientProtocol').value,
+      clientServerUrl:  $('clientServerUrl').value.trim(),
+      clientPath:       $('clientPath').value.trim() || '/api/sensor/push',
+      clientToken:      $('clientToken').value,
+      clientIntervalMs: parseInt($('clientIntervalMs').value, 10) || 100,
+
+      flashlightMode:  $('flashlightMode').value,
+      lightThreshold:  parseInt($('lightThreshold').value, 10) || 50,
+
+      cameraPreviewEnabled:  $('cameraPreviewEnabled').checked,
+      cameraPreviewFps:      parseInt($('cameraPreviewFps').value, 10) || 5,
+      cameraPreviewQuality:  parseInt($('cameraPreviewQuality').value, 10) || 50,
+      cameraPreviewRotation: parseInt($('cameraPreviewRotation').value, 10) || 0,
+
+      cameraMountRotationDeg: parseInt($('cameraMountRotationDeg').value, 10) || 0,
+      invertDx:               $('invertDx').checked,
+      invertDy:               $('invertDy').checked,
+
+      publishOnlyOnChange:         $('publishOnlyOnChange').checked,
+      publishMotionThresholdPx:    parseFloat($('publishMotionThresholdPx').value) || 0.4,
+      publishRotationThresholdDeg: parseFloat($('publishRotationThresholdDeg').value) || 0.2,
+      publishHeartbeatMs:          parseInt($('publishHeartbeatMs').value, 10) || 0,
+
+      targetWidth:     parseInt($('targetWidth').value, 10) || 112,
+      searchRadius:    parseInt($('searchRadius').value, 10) || 4,
+      blockSize:       parseInt($('blockSize').value, 10) || 8,
+      minContrast:     parseInt($('minContrast').value, 10) || 3,
+      maxSadPx:        parseInt($('maxSadPx').value, 10) || 18
+    };
+    var httpPort = parseInt($('httpPort').value, 10);
+    if (httpPort > 0) payload.httpPort = httpPort;
+    return payload;
+  }
+
+  // ------------------------------------------------------------
+  // Загрузка конфига
+  // ------------------------------------------------------------
+  function loadCfg() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/sensor/config', true);
+    xhr.setRequestHeader('Authorization', basicAuth());
+    xhr.onload = function() {
+      if (xhr.status === 401) { $('out').textContent = 'Неверный логин или пароль (401)'; return; }
+      if (xhr.status !== 200) { $('out').textContent = 'HTTP ' + xhr.status; return; }
+      try {
+        var j = JSON.parse(xhr.responseText);
+        applyForm(j.config);
+        if (typeof j.httpPortActive === 'number') {
+          $('portInfo').innerHTML =
+              'Сервер сейчас работает на порту <b>' + j.httpPortActive + '</b>.'
+              + ' В конфиге: ' + j.config.httpPort + '.'
+              + (j.httpPortActive !== j.config.httpPort
+                  ? ' <span style="color:#fa4">⚠ нажмите «Применить HTTP-порт»</span>'
+                  : '');
+        }
+        $('out').textContent = JSON.stringify(j.config, null, 2);
+      } catch (e) {
+        $('out').textContent = 'Ошибка разбора JSON: ' + e.message;
+      }
+    };
+    xhr.onerror = function() { $('out').textContent = 'network error'; };
+    xhr.send();
+  }
+
+  // ------------------------------------------------------------
+  // Сохранение конфига
+  // ------------------------------------------------------------
+  function saveCfg() {
+    var payload = readForm();
+
+    var nu = $('newUser').value; if (nu) payload.configUser = nu;
+    var np = $('newPass').value; if (np) payload.configPass = np;
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/config', true);
+    xhr.setRequestHeader('Authorization', basicAuth());
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onload = function() {
+      if (xhr.status === 401) { $('out').textContent = 'Неверный логин или пароль (401)'; return; }
+      if (xhr.status !== 200) {
+        $('out').textContent = 'HTTP ' + xhr.status + '\n' + xhr.responseText;
+        return;
+      }
+      try {
+        var j = JSON.parse(xhr.responseText);
+        applyForm(j.config);
+        var txt = 'Сохранено.\n\n' + JSON.stringify(j.config, null, 2);
+        if (typeof j.httpPortActive === 'number' && j.config.httpPort !== j.httpPortActive) {
+          txt += '\n\n⚠ HTTP-порт в конфиге (' + j.config.httpPort
+              + ') отличается от работающего (' + j.httpPortActive
+              + '). Нажмите «Применить HTTP-порт и перезапустить», чтобы переключиться.';
+        }
+        $('out').textContent = txt;
+        $('newUser').value = '';
+        $('newPass').value = '';
+        if (nu) $('user').value = nu;
+        if (np) $('pass').value = np;
+        loadCfg();
+      } catch (e) {
+        $('out').textContent = 'Сохранено, но ответ не JSON: ' + e.message;
+      }
+    };
+    xhr.onerror = function() { $('out').textContent = 'network error'; };
+    xhr.send(JSON.stringify(payload));
+  }
+
+  // ------------------------------------------------------------
+  // Перезапуск камеры
+  // ------------------------------------------------------------
+  function restartSensor() {
+    var x1 = new XMLHttpRequest();
+    x1.open('POST', '/api/sensor/stop', true);
+    x1.onload = function() {
+      $('out').textContent = 'Камера остановлена, запускаю заново…';
+      setTimeout(function() {
+        var x2 = new XMLHttpRequest();
+        x2.open('POST', '/api/sensor/start', true);
+        x2.onload = function() { $('out').textContent = 'Камера перезапущена.'; };
+        x2.onerror = function() { $('out').textContent = 'Ошибка сети при запуске'; };
+        x2.send();
+      }, 400);
+    };
+    x1.onerror = function() { $('out').textContent = 'Ошибка сети при остановке'; };
+    x1.send();
+  }
+
+  // ------------------------------------------------------------
+  // Применить HTTP-порт и перезапустить сервер
+  // ------------------------------------------------------------
+  function applyHttpPort() {
+    var newPort = parseInt($('httpPort').value, 10);
+    if (!newPort || newPort < 1 || newPort > 65535) {
+      $('portWarn').style.display = '';
+      $('portWarn').textContent = 'Некорректный порт';
+      return;
+    }
+    if (!confirm('Перезапустить HTTP-сервер на порту ' + newPort + '?\n'
+               + 'Текущая страница станет недоступна на старом порту.')) return;
+
+    $('portWarn').style.display = 'none';
+
+    // 1) сохранить конфиг
+    var savePayload = readForm();
+    savePayload.httpPort = newPort;
+    var nu = $('newUser').value; if (nu) savePayload.configUser = nu;
+    var np = $('newPass').value; if (np) savePayload.configPass = np;
+
+    var x1 = new XMLHttpRequest();
+    x1.open('POST', '/api/sensor/config', true);
+    x1.setRequestHeader('Authorization', basicAuth());
+    x1.setRequestHeader('Content-Type', 'application/json');
+    x1.onload = function() {
+      if (x1.status !== 200) {
+        $('portWarn').style.display = '';
+        $('portWarn').textContent = 'Ошибка сохранения конфига: HTTP ' + x1.status;
+        return;
+      }
+      // 2) перезапустить HTTP на новом порту
+      var x2 = new XMLHttpRequest();
+      x2.open('POST', '/api/sensor/restart-http', true);
+      x2.setRequestHeader('Authorization', basicAuth());
+      x2.setRequestHeader('Content-Type', 'application/json');
+      x2.onload = function() {
+        if (x2.status !== 200) {
+          $('portWarn').style.display = '';
+          $('portWarn').textContent = 'Ошибка перезапуска: HTTP ' + x2.status;
+          return;
+        }
+        var j = {};
+        try { j = JSON.parse(x2.responseText); } catch (e) {}
+
+        $('portWarn').style.display = '';
+        $('portWarn').className = 'hint';
+        $('portWarn').textContent =
+            'Перезапуск… Переход на http://' + location.hostname + ':'
+            + newPort + '/config.html через 2.5 сек.';
+
+        setTimeout(function() {
+          location.href = location.protocol + '//' + location.hostname + ':'
+                       + newPort + '/config.html';
+        }, 2500);
+      };
+      x2.onerror = function() {
+        $('portWarn').style.display = '';
+        $('portWarn').textContent = 'Ошибка сети при перезапуске';
+      };
+      x2.send(JSON.stringify({port: newPort}));
+    };
+    x1.onerror = function() {
+      $('portWarn').style.display = '';
+      $('portWarn').textContent = 'Ошибка сети при сохранении';
+    };
+    x1.send(JSON.stringify(savePayload));
+  }
+
+  window.loadCfg       = loadCfg;
+  window.saveCfg       = saveCfg;
+  window.restartSensor = restartSensor;
+  window.applyHttpPort = applyHttpPort;
+
+  loadCfg();
+})();
+</script>
+</body>
+</html>

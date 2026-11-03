@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Информация — OpticalPositionSensor</title>
+    <style>
+  body{margin:0;background:#101418;color:#e6f0f4;font:14px/1.4 monospace;padding:0}
+  header{background:#182028;padding:10px 14px;display:flex;justify-content:space-between;
+         align-items:center;flex-wrap:wrap;gap:8px}
+  header h1{font-size:15px;margin:0;color:#6cf}
+  header nav a{color:#6cf;text-decoration:none;margin-left:8px;padding:4px 10px;
+               border-radius:4px;border:1px solid #234}
+  header nav a.active{background:#248;border-color:#248;color:#fff}
+  main{padding:12px}
+  .card{background:#182028;border-radius:8px;padding:12px;margin-bottom:12px}
+  .card h2{font-size:14px;margin:0 0 10px;color:#adf}
+  .hint{color:#8aa;font-size:12px;margin:0 0 10px}
+  .row{display:flex;gap:8px;align-items:center;margin-bottom:6px}
+  .row label{color:#8aa;font-size:12px;min-width:64px}
+  .row .val{flex:1}
+  input[readonly]{background:#0e1418;color:#e6f0f4;border:1px solid #234;
+                  border-radius:4px;padding:6px 8px;width:100%;box-sizing:border-box;
+                  font-family:monospace;font-size:13px}
+  button{background:#248;color:#fff;border:0;border-radius:6px;padding:6px 10px;
+         cursor:pointer;font-family:monospace;font-size:12px}
+  button:active{background:#369}
+  .pill{display:inline-block;padding:2px 8px;border-radius:10px;
+        font-size:11px;font-weight:bold}
+  .pill.on{background:#285;color:#fff}
+  .pill.off{background:#533;color:#fcc}
+  .warn{color:#fca;font-size:12px;margin-top:6px;background:#221408;
+        padding:6px 8px;border-radius:4px;border-left:3px solid #fa4}
+  .endpoints{font-size:12px;line-height:1.9}
+  .endpoints code{color:#adf;background:#0e1418;padding:2px 6px;border-radius:3px}
+  .endpoints div{margin-bottom:2px}
+  .services div{padding:3px 0;font-size:13px}
+
+  /* Большой блок подключения */
+  #mainUrlBox{
+    font-size:20px;color:#6cf;word-break:break-all;user-select:all;
+    padding:14px;background:#0e1418;border-radius:8px;
+    text-align:center;border:2px solid #248;letter-spacing:0.5px;
+    margin-bottom:10px;
+  }
+  #mainUrlBox.warn{color:#fa4;border-color:#fa4;font-size:14px;letter-spacing:normal}
+  #copyStatus{color:#285;font-size:12px;margin-left:8px}
+  .ipRow{display:flex;gap:12px;margin-top:10px}
+  .ipRow .kv{flex:1;background:#0e1418;border-radius:6px;padding:8px}
+  .ipRow .k{color:#8aa;font-size:11px;text-transform:uppercase}
+  .ipRow .v{font-size:16px;color:#adf;font-family:monospace;word-break:break-all}
+  .diagnostics{background:#0e1418;padding:8px;border-radius:6px;font-size:11px;
+               color:#8aa;margin-top:10px;max-height:200px;overflow:auto}
+  .diagnostics .iface{padding:2px 0}
+  .diagnostics .iface .nm{color:#adf;display:inline-block;min-width:90px}
+  .diagnostics .iface .pref{color:#285}
+</style>
+</head>
+<body>
+<header>
+    <h1>Информация</h1>
+    <nav>
+        <a href="index.html" class="active">Информация</a>
+        <a href="sensor.html">Live</a>
+        <a href="config.html">Настройки</a>
+    </nav>
+</header>
+<main>
+
+    <!-- ============================================================ -->
+    <!--  ГЛАВНЫЙ БЛОК: АДРЕС ДЛЯ ПОДКЛЮЧЕНИЯ                        -->
+    <!-- ============================================================ -->
+    <div class="card">
+        <h2>Подключение к устройству</h2>
+        <p class="hint">Откройте этот адрес в браузере на другом устройстве в той же сети:</p>
+
+        <div id="mainUrlBox" class="warn">Определение адреса…</div>
+
+        <div style="text-align:center;margin-bottom:8px">
+            <button onclick="copyUrl('mainUrlBox')">Копировать адрес</button>
+            <span id="copyStatus"></span>
+        </div>
+
+        <div class="ipRow">
+            <div class="kv">
+                <div class="k">IP-адрес</div>
+                <div class="v" id="ipText">—</div>
+            </div>
+            <div class="kv">
+                <div class="k">Активный порт</div>
+                <div class="v" id="portText">—</div>
+            </div>
+        </div>
+
+        <div id="warnBlock" class="warn" style="display:none"></div>
+
+        <div class="diagnostics" id="diagnostics" style="display:none">
+            <div style="color:#adf;margin-bottom:4px">
+                Сетевые интерфейсы, которые видит сервер:
+            </div>
+            <div id="ifaceList">—</div>
+            <div style="color:#8aa;margin-top:6px;font-size:11px">
+                Если в списке только <code>rmnet*</code> / <code>ccmni*</code> — Wi-Fi
+                не подключён. Включите Wi-Fi и подключитесь к точке доступа.<br>
+                Если wlan0 есть, но IP = <code>169.254.*</code> — DHCP не выдал адрес.<br>
+                Если ничего нет — на этом ROM <code>WifiManager</code> тоже не отдаёт IP,
+                нужен ручной ввод.
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!--  АДРЕСА ДЛЯ КАЖДОГО ПРОТОКОЛА                               -->
+    <!-- ============================================================ -->
+    <div class="card">
+        <h2>Адреса для разных протоколов</h2>
+        <p class="hint">Для подключения клиентов, скриптов, пультов</p>
+
+        <div class="row">
+            <label>HTTP:</label>
+            <div class="val"><input readonly id="urlHttp"></div>
+            <button onclick="copyUrl('urlHttp')">Копировать</button>
+        </div>
+        <div class="row">
+            <label>SSE:</label>
+            <div class="val"><input readonly id="urlSse"></div>
+            <button onclick="copyUrl('urlSse')">Копировать</button>
+        </div>
+        <div class="row">
+            <label>WS:</label>
+            <div class="val"><input readonly id="urlWs"></div>
+            <button onclick="copyUrl('urlWs')">Копировать</button>
+        </div>
+        <div class="row">
+            <label>Telnet:</label>
+            <div class="val"><input readonly id="urlTelnet"></div>
+            <button onclick="copyUrl('urlTelnet')">Копировать</button>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!--  СОСТОЯНИЕ СЕРВИСОВ                                        -->
+    <!-- ============================================================ -->
+    <div class="card">
+        <h2>Состояние сервисов</h2>
+        <div class="services" id="services">—</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!--  REST API                                                  -->
+    <!-- ============================================================ -->
+    <div class="card">
+        <h2>REST API</h2>
+        <div class="endpoints">
+            <div><code>GET  /api/sensor/last</code> — последнее измерение (JSON)</div>
+            <div><code>GET  /api/sensor/status</code> — статус сервиса и фонарика</div>
+            <div><code>GET  /api/sensor/sse</code> — поток (Server-Sent Events)</div>
+            <div><code>POST /api/sensor/start</code> — запустить трансляцию</div>
+            <div><code>POST /api/sensor/stop</code> — остановить трансляцию</div>
+            <div><code>POST /api/sensor/flashlight</code> — {"mode":"off|on|auto","threshold":50}</div>
+            <div><code>GET / POST /api/sensor/config</code> — настройки (Basic admin/admin)</div>
+        </div>
+    </div>
+
+</main>
+<script>
+(function() {
+  var $ = function(id){ return document.getElementById(id); };
+
+  // ------------------------------------------------------------
+  // Копирование содержимого input / div
+  // ------------------------------------------------------------
+  function legacyCopy(text) {
+    var tmp = document.createElement('textarea');
+    tmp.value = text;
+    tmp.style.position = 'fixed';
+    tmp.style.left = '-9999px';
+    document.body.appendChild(tmp);
+    tmp.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(tmp);
+  }
+
+  function copyUrl(id) {
+    var el = $(id);
+    if (!el) return;
+    var text = (el.tagName === 'INPUT') ? el.value : (el.textContent || el.innerText);
+    if (!text || text === '—') return;
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        flashCopied();
+      }).catch(function() {
+        legacyCopy(text);
+        flashCopied();
+      });
+    } else {
+      legacyCopy(text);
+      flashCopied();
+    }
+  }
+
+  function flashCopied() {
+    var s = $('copyStatus');
+    if (!s) return;
+    s.textContent = 'скопировано';
+    setTimeout(function() { s.textContent = ''; }, 2000);
+  }
+
+  // ------------------------------------------------------------
+  // Проверка, пригоден ли IP для LAN
+  // ------------------------------------------------------------
+ function isValidLanIp(ip) {
+    if (!ip) return false;
+    if (ip === '127.0.0.1') return false;
+    if (ip === 'localhost') return false;
+    if (ip === '0.0.0.0') return false;
+    if (ip.indexOf('169.254.') === 0) return false;
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return false;
+    return true;
+  }
+
+  // ------------------------------------------------------------
+  // Главная отрисовка
+  // ------------------------------------------------------------
+   function renderStatus(st) {
+    var serverIp    = st.localIp || '';
+    var browserHost = location.hostname || '';
+    var port        = st.httpPortActive || st.httpPort || 8080;
+
+    // Приоритет: serverIp → browserHost (если не 127.0.0.1)
+    var displayIp = null;
+    if (isValidLanIp(serverIp)) {
+      displayIp = serverIp;
+    } else if (isValidLanIp(browserHost)) {
+      displayIp = browserHost;
+    }
+
+    var box = $('mainUrlBox');
+    if (displayIp) {
+      box.textContent = 'http://' + displayIp + ':' + port + '/';
+      box.className = '';
+      $('warnBlock').style.display = 'none';
+      $('diagnostics').style.display = 'none';
+    } else {
+      box.textContent = 'IP-адрес не определён';
+      box.className = 'warn';
+
+      $('warnBlock').style.display = '';
+      $('warnBlock').innerHTML =
+          'Не удалось определить LAN-адрес. Список интерфейсов ниже — что видит сервер.';
+
+      var ips = st.localIps || [];
+      if (ips.length === 0) {
+        $('ifaceList').textContent = '(нет ни одного активного IPv4-интерфейса)';
+      } else {
+        var html = '';
+        for (var i = 0; i < ips.length; i++) {
+          var e = ips[i];
+          html += '<div class="iface">'
+                + '<span class="nm">[' + (e.source || 'NI') + '] ' + e.name + '</span>'
+                + '<span>' + e.ip + '</span>'
+                + (e.preferred ? ' <span class="pref">✓</span>' : '')
+                + '</div>';
+        }
+        $('ifaceList').innerHTML = html;
+      }
+      $('diagnostics').style.display = '';
+    }
+
+    $('ipText').textContent   = displayIp || '—';
+    $('portText').textContent = port;
+
+    if (displayIp) {
+      $('urlHttp').value   = 'http://' + displayIp + ':' + port + '/';
+      $('urlSse').value    = 'http://' + displayIp + ':' + port + '/api/sensor/sse';
+      $('urlWs').value     = 'ws://'   + displayIp + ':' + (st.wsPort > 0 ? st.wsPort : 8090) + '/';
+      $('urlTelnet').value = displayIp + ':' + (st.telnetPort > 0 ? st.telnetPort : 8091);
+    } else {
+      $('urlHttp').value = $('urlSse').value = $('urlWs').value = $('urlTelnet').value = '—';
+    }
+
+    // ... ниже — блок statusJson для «Состояние сервисов» и REST API как было
+    var html = '';
+    html += '<div>HTTP (REST+SSE): '
+         + pill(st.httpActive ? 'ON' : 'OFF', !!st.httpActive)
+         + ' порт ' + (st.httpPortActive || st.httpPort || 8080) + '</div>';
+    html += '<div>WebSocket: '
+         + pill(st.wsActive ? 'ON' : 'OFF', !!st.wsActive)
+         + ' порт ' + (st.wsPort > 0 ? st.wsPort : '—')
+         + (st.wsClients ? ' • клиентов: ' + st.wsClients : '') + '</div>';
+    html += '<div>Telnet: '
+         + pill(st.telnetActive ? 'ON' : 'OFF', !!st.telnetActive)
+         + ' порт ' + (st.telnetPort > 0 ? st.telnetPort : '—')
+         + (st.telnetClients ? ' • клиентов: ' + st.telnetClients : '') + '</div>';
+    html += '<div>Датчик: '
+         + pill(st.sensorRunning ? 'RUNNING' : 'STOPPED', !!st.sensorRunning)
+         + (st.previewWidth ? ' • кадр ' + st.previewWidth + '×' + st.previewHeight : '')
+         + '</div>';
+    html += '<div>Подписчиков на поток: ' + (st.subscribers || 0) + '</div>';
+    html += '<div>Клиентский режим (push): '
+         + (st.clientEnabled ? 'включён' : 'выключен') + '</div>';
+
+    if (st.flashlight) {
+      var f = st.flashlight;
+      var txt;
+      if (!f.available) {
+        txt = 'недоступен';
+      } else {
+        txt = 'режим ' + f.mode + (f.on ? ' • ON' : ' • OFF');
+        if (typeof f.lux === 'number' && f.lux >= 0) {
+          txt += ' • ' + f.lux.toFixed(0) + ' lx';
+        }
+      }
+      html += '<div>Фонарик: ' + txt + '</div>';
+    }
+    $('services').innerHTML = html;
+  }
+
+  function pill(text, on) {
+    return '<span class="pill ' + (on ? 'on' : 'off') + '">' + text + '</span>';
+  }
+
+  // ------------------------------------------------------------
+  // Polling статуса
+  // ------------------------------------------------------------
+  function refresh() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/sensor/status', true);
+    xhr.onload = function() {
+      if (xhr.status !== 200) return;
+      try { renderStatus(JSON.parse(xhr.responseText)); }
+      catch (e) {}
+    };
+    xhr.onerror = function() {
+      var box = $('mainUrlBox');
+      if (box && box.textContent === 'Определение адреса…') {
+        box.textContent = 'Сервер не отвечает';
+        box.className = 'warn';
+      }
+    };
+    xhr.send();
+  }
+
+  window.copyUrl = copyUrl;
+
+  refresh();
+  setInterval(refresh, 2000);
+})();
+</script>
+</body>
+</html>

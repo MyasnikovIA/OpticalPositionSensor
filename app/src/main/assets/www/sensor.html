@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Live — OpticalPositionSensor</title>
+    <style>
+  body{margin:0;background:#101418;color:#e6f0f4;font:14px/1.4 monospace;padding:0}
+  header{background:#182028;padding:10px 14px;display:flex;justify-content:space-between;
+         align-items:center;flex-wrap:wrap;gap:8px}
+  header h1{font-size:15px;margin:0;color:#6cf}
+  header nav a{color:#6cf;text-decoration:none;margin-left:8px;padding:4px 10px;
+               border-radius:4px;border:1px solid #234}
+  header nav a.active{background:#248;border-color:#248;color:#fff}
+  main{padding:12px}
+  .banner{padding:10px 12px;border-radius:6px;margin-bottom:12px;font-size:13px}
+  .banner.err{background:#4a1c1c;color:#fdd;border-left:4px solid #d33}
+  .banner.info{background:#1c2a4a;color:#ccf;border-left:4px solid #36c}
+  .card{background:#182028;border-radius:8px;padding:12px;margin-bottom:12px}
+  .card h2{font-size:14px;margin:0 0 10px;color:#adf}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .kv{flex:1;min-width:110px;background:#0e1418;border-radius:6px;padding:8px}
+  .k{color:#8aa;font-size:11px;text-transform:uppercase}
+  .v{font-size:18px;color:#6cf}
+  .v.small{font-size:14px;color:#adf}
+  button{background:#248;color:#fff;border:0;border-radius:6px;padding:8px 14px;
+         cursor:pointer;font-family:monospace;font-size:13px;margin-right:6px}
+  button:active{background:#369}
+  button.green{background:#285}
+  button.red{background:#833}
+  button:disabled{background:#333;color:#777;cursor:not-allowed;opacity:0.7}
+  .pill{display:inline-block;padding:2px 8px;border-radius:10px;
+        font-size:11px;font-weight:bold}
+  .pill.on{background:#285;color:#fff}
+  .pill.off{background:#533;color:#fcc}
+  pre{white-space:pre-wrap;word-break:break-all;background:#0e1418;padding:8px;
+      border-radius:6px;font-size:11px;max-height:250px;overflow:auto}
+  #statusLine{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  #statusLine .lbl{color:#8aa;font-size:12px}
+
+  #pubLine{color:#8aa;font-size:11px;margin-bottom:10px}
+  #pubInfo{color:#adf}
+
+  #connectUrl{font-size:18px;color:#6cf;word-break:break-all;user-select:all;
+              padding:8px;background:#0e1418;border-radius:6px}
+  #connectUrl.warn{color:#fa4;font-size:14px}
+
+  #camWrap{background:#000;text-align:center;border-radius:6px;overflow:hidden}
+  #camStream{width:100%;max-height:60vh;object-fit:contain;background:#000;
+             display:block;margin:0 auto}
+  #camHint{color:#8aa;font-size:11px;margin-top:6px}
+  #copyStatus{color:#285;font-size:12px;margin-left:8px}
+</style>
+</head>
+<body>
+<header>
+    <h1>Live</h1>
+    <nav>
+        <a href="index.html">Информация</a>
+        <a href="sensor.html" class="active">Live</a>
+        <a href="config.html">Настройки</a>
+    </nav>
+</header>
+<main>
+
+    <div id="banner" class="banner err" style="display:none"></div>
+
+    <!-- ================= ПОДКЛЮЧЕНИЕ ================= -->
+    <div class="card" id="connectCard">
+        <h2>Подключение</h2>
+        <div style="color:#8aa;font-size:11px;text-transform:uppercase;margin-bottom:4px">
+            Адрес для подключения
+        </div>
+        <div id="connectUrl" class="warn">—</div>
+        <div style="margin-top:8px">
+            <button onclick="copyConnectUrl()">Копировать адрес</button>
+            <span id="copyStatus"></span>
+        </div>
+        <div style="margin-top:10px;color:#8aa;font-size:11px">
+            <div>IP-адрес: <span id="ipText" style="color:#adf">—</span></div>
+            <div>Активный порт: <span id="portText" style="color:#adf">—</span></div>
+            <div>Устройство доступно с других ПК/телефонов в той же сети Wi-Fi.</div>
+        </div>
+    </div>
+
+    <!-- ================= ИЗОБРАЖЕНИЕ С КАМЕРЫ ================= -->
+    <div class="card">
+        <h2>Изображение с камеры</h2>
+        <div id="camWrap">
+            <img id="camStream"
+                 src="/api/sensor/stream.mjpg"
+                 alt="camera" />
+        </div>
+        <div id="camHint">
+            MJPEG: <code>/api/sensor/stream.mjpg</code> •
+            один кадр: <code>/api/sensor/snapshot.jpg</code>
+        </div>
+    </div>
+
+    <!-- ================= ТРАНСЛЯЦИЯ ================= -->
+    <div class="card">
+        <h2>Трансляция (optical flow)</h2>
+        <div id="statusLine">
+            <div><span class="lbl">Статус:</span> <span id="statePill"></span></div>
+            <div><span class="lbl">Кадр:</span> <span id="frameText">—</span></div>
+        </div>
+        <div id="pubLine">
+            Публикация: <span id="pubInfo">—</span>
+        </div>
+        <div style="margin-bottom:10px">
+            <button id="btnStart" class="green" onclick="doStart()">▶ Запустить</button>
+            <button id="btnStop"  class="red"   onclick="doStop()">■ Остановить</button>
+        </div>
+    </div>
+
+    <!-- ================= ДВИЖЕНИЕ ================= -->
+    <div class="card">
+        <h2>Движение</h2>
+        <div class="row">
+            <div class="kv"><div class="k">dx, px</div><div class="v" id="dx">—</div></div>
+            <div class="kv"><div class="k">dy, px</div><div class="v" id="dy">—</div></div>
+            <div class="kv"><div class="k">dist, px</div><div class="v" id="dist">—</div></div>
+            <div class="kv"><div class="k">направление</div><div class="v" id="dir">—</div></div>
+            <div class="kv"><div class="k">поворот</div><div class="v" id="rot">—</div></div>
+        </div>
+    </div>
+
+    <!-- ================= ФОНАРИК + КАЧЕСТВО ================= -->
+    <div class="card">
+        <h2>Фонарик и качество</h2>
+        <div class="row">
+            <div class="kv"><div class="k">фонарик</div><div class="v small" id="flash">—</div></div>
+            <div class="kv"><div class="k">applied</div><div class="v small" id="flashApplied">—</div></div>
+            <div class="kv"><div class="k">lux</div><div class="v small" id="lux">—</div></div>
+            <div class="kv"><div class="k">confidence</div><div class="v small" id="conf">—</div></div>
+            <div class="kv"><div class="k">proc, ms</div><div class="v small" id="proc">—</div></div>
+        </div>
+        <div style="margin-top:10px">
+            <button onclick="setFlash('off')">Фонарь OFF</button>
+            <button onclick="setFlash('on')">Фонарь ON</button>
+            <button onclick="setFlash('auto')">Фонарь AUTO</button>
+        </div>
+        <pre id="flashDebug" style="margin-top:10px;font-size:11px;color:#8aa;max-height:180px">—</pre>
+    </div>
+
+    <!-- ================= JSON ================= -->
+    <div class="card">
+        <h2>Последний JSON</h2>
+        <pre id="json">—</pre>
+    </div>
+
+</main>
+<script>
+(function() {
+  var $ = function(id){ return document.getElementById(id); };
+  var es = null;
+  var autoStarted = false;
+
+  // ------------------------------------------------------------
+  // Баннер
+  // ------------------------------------------------------------
+  function showBanner(kind, text) {
+    var b = $('banner');
+    if (!text) { b.style.display = 'none'; return; }
+    b.style.display = '';
+    b.className = 'banner ' + (kind === 'info' ? 'info' : 'err');
+    b.textContent = text;
+  }
+
+  // ------------------------------------------------------------
+  // Копирование адреса подключения
+  // ------------------------------------------------------------
+  function legacyCopy(text) {
+    var tmp = document.createElement('textarea');
+    tmp.value = text;
+    tmp.style.position = 'fixed';
+    tmp.style.left = '-9999px';
+    document.body.appendChild(tmp);
+    tmp.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(tmp);
+    flashCopied();
+  }
+
+  function flashCopied() {
+    var s = $('copyStatus');
+    if (!s) return;
+    s.textContent = 'скопировано';
+    setTimeout(function() { s.textContent = ''; }, 2000);
+  }
+
+  function copyConnectUrl() {
+    var el = $('connectUrl');
+    if (!el) return;
+    var text = el.textContent || el.innerText;
+    if (!text || text === '—' || el.className.indexOf('warn') >= 0) return;
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        flashCopied();
+      }).catch(function() {
+        legacyCopy(text);
+      });
+      return;
+    }
+    legacyCopy(text);
+  }
+
+  // ------------------------------------------------------------
+  // Состояние, значения
+  // ------------------------------------------------------------
+  function setState(running) {
+    var p = $('statePill');
+    if (running) {
+      p.className = 'pill on';
+      p.textContent = 'RUNNING';
+    } else {
+      p.className = 'pill off';
+      p.textContent = 'STOPPED';
+    }
+    $('btnStart').disabled = !!running;
+    $('btnStop').disabled  = !running;
+  }
+
+  function updateFlashUi(f) {
+    if (!f) { $('flash').textContent = '—'; return; }
+    if (!f.available) {
+      $('flash').textContent = 'недоступен';
+      $('flashApplied').textContent = '—';
+    } else {
+      $('flash').textContent = f.mode + (f.on ? ' • ON' : ' • OFF');
+      $('flashApplied').textContent = f.appliedMode || '—';
+    }
+    if (typeof f.lux === 'number' && f.lux >= 0) {
+      $('lux').textContent = f.lux.toFixed(0) + ' lx';
+    }
+    $('flashDebug').textContent = JSON.stringify(f, null, 2);
+  }
+
+  function renderReading(r) {
+    if (!r) return;
+    var s = r.shift || {};
+    if (typeof s.dx_px         === 'number') $('dx').textContent   = s.dx_px.toFixed(3);
+    if (typeof s.dy_px         === 'number') $('dy').textContent   = s.dy_px.toFixed(3);
+    if (typeof s.distance_px   === 'number') $('dist').textContent = s.distance_px.toFixed(3);
+    if (typeof s.direction_deg === 'number') $('dir').textContent  = s.direction_deg.toFixed(1) + '°';
+    if (typeof s.rotation_deg  === 'number') $('rot').textContent  = s.rotation_deg.toFixed(3) + '°';
+    if (r.quality && typeof r.quality.confidence === 'number')
+      $('conf').textContent = r.quality.confidence.toFixed(2);
+    if (typeof r.proc_ms === 'number') $('proc').textContent = r.proc_ms.toFixed(2);
+    if (r.frame) $('frameText').textContent = r.frame.width + '×' + r.frame.height;
+    if (r.flashlight) updateFlashUi(r.flashlight);
+    $('json').textContent = JSON.stringify(r, null, 2);
+  }
+
+  // ------------------------------------------------------------
+  // SSE
+  // ------------------------------------------------------------
+  function connectSSE() {
+    if (es) { try { es.close(); } catch (e) {} es = null; }
+    try {
+      es = new EventSource('/api/sensor/sse');
+      es.addEventListener('reading', function(e) {
+        try { renderReading(JSON.parse(e.data)); } catch (x) {}
+      });
+    } catch (e) {
+      setTimeout(connectSSE, 3000);
+    }
+  }
+
+  // ------------------------------------------------------------
+  // Статус сервиса (polling раз в 2 сек)
+  // ------------------------------------------------------------
+  function refreshStatus() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/sensor/status', true);
+    xhr.onload = function() {
+      if (xhr.status !== 200) return;
+      try {
+        var st = JSON.parse(xhr.responseText);
+        setState(!!st.sensorRunning);
+        if (st.previewWidth) {
+          $('frameText').textContent = st.previewWidth + '×' + st.previewHeight;
+        }
+        if (st.flashlight) updateFlashUi(st.flashlight);
+
+        // --- IP / порт / адрес подключения ---
+        var ip = st.localIp || '—';
+        var port = st.httpPortActive || st.httpPort || 8080;
+        $('ipText').textContent   = ip;
+        $('portText').textContent = port;
+
+        var cu = $('connectUrl');
+        if (ip && ip !== '127.0.0.1' && ip !== '—') {
+          cu.textContent = 'http://' + ip + ':' + port + '/';
+          cu.className = '';
+        } else {
+          cu.textContent = 'IP не определён (нет Wi-Fi?)';
+          cu.className = 'warn';
+        }
+
+        // --- Публикация ---
+        var info = '';
+        if (st.publishOnlyOnChange === false) {
+          info = 'выключен (публикуется каждый кадр)';
+        } else {
+          var ago = st.lastPublishMs
+              ? Math.round((new Date().getTime()) - st.lastPublishMs) : -1;
+          var pubSeq = st.publishSeq || 0;
+          var skipped = st.skippedReadings || 0;
+          info = 'публикаций: ' + pubSeq + ' • пропущено: ' + skipped;
+          if (ago >= 0) {
+            info += ' • последняя '
+                  + (ago < 1000 ? 'сейчас' : (ago / 1000).toFixed(1) + ' с назад');
+          }
+          if (st.publishHeartbeatMs) {
+            info += ' • heartbeat ' + (st.publishHeartbeatMs / 1000).toFixed(0) + ' c';
+          }
+        }
+        $('pubInfo').textContent = info;
+
+        // --- Баннер ---
+        if (!st.sensorRunning) {
+          if (st.lastCameraError) {
+            showBanner('err', 'Камера не запущена: ' + st.lastCameraError);
+          } else {
+            showBanner('err', 'Камера остановлена. Нажмите «▶ Запустить».');
+          }
+          if (!autoStarted && st.autoStart && !st.lastCameraError) {
+            autoStarted = true;
+            setTimeout(doStart, 400);
+          }
+        } else {
+          showBanner(null, '');
+        }
+      } catch (e) {}
+    };
+    xhr.send();
+  }
+
+  // ------------------------------------------------------------
+  // Управление камерой
+  // ------------------------------------------------------------
+  function doStart() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/start', true);
+    xhr.onload = function() { refreshStatus(); };
+    xhr.onerror = function() { showBanner('err', 'Ошибка сети при запуске'); };
+    xhr.send();
+  }
+
+  function doStop() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/stop', true);
+    xhr.onload = function() { refreshStatus(); };
+    xhr.onerror = function() { showBanner('err', 'Ошибка сети при остановке'); };
+    xhr.send();
+  }
+
+  function setFlash(mode) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/flashlight', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onload = function() {
+      try {
+        var f = JSON.parse(xhr.responseText);
+        updateFlashUi(f);
+      } catch (e) {}
+      refreshStatus();
+    };
+    xhr.onerror = function() {
+      $('flashDebug').textContent = 'network error';
+    };
+    xhr.send(JSON.stringify({mode: mode}));
+  }
+
+  window.doStart        = doStart;
+  window.doStop         = doStop;
+  window.setFlash       = setFlash;
+  window.copyConnectUrl = copyConnectUrl;
+
+  // ------------------------------------------------------------
+  // MJPEG-превью с fallback на JPEG-опрос
+  // ------------------------------------------------------------
+  (function setupCameraPreview() {
+    var img  = $('camStream');
+    var hint = $('camHint');
+    var useMjpeg = true;
+    var pollTimer = null;
+
+    function startPoll() {
+      if (pollTimer) return;
+      hint.innerHTML = 'MJPEG недоступен, используется JPEG-опрос (4 fps)';
+      function tick() {
+        img.src = '/api/sensor/snapshot.jpg?t=' + new Date().getTime();
+      }
+      tick();
+      pollTimer = setInterval(tick, 250);
+    }
+
+    img.onerror = function() {
+      if (useMjpeg) {
+        useMjpeg = false;
+        startPoll();
+      }
+    };
+
+    setTimeout(function() {
+      if (useMjpeg && (!img.naturalWidth || img.naturalWidth === 0)) {
+        useMjpeg = false;
+        startPoll();
+      }
+    }, 3000);
+  })();
+
+  // ------------------------------------------------------------
+  // Старт
+  // ------------------------------------------------------------
+  refreshStatus();
+  setInterval(refreshStatus, 2000);
+  connectSSE();
+})();
+</script>
+</body>
+</html>
