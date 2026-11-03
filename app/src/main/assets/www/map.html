@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Карта — OpticalPositionSensor</title>
+    <link rel="icon" href="data:,">
     <style>
   body{margin:0;background:#101418;color:#e6f0f4;font:14px/1.4 monospace;padding:0}
   header{background:#182028;padding:10px 14px;display:flex;justify-content:space-between;
@@ -36,10 +37,16 @@
   .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;
             font-size:12px;color:#8aa}
   .controls label{display:flex;align-items:center;gap:4px;color:#e6f0f4}
-  .controls input[type=range]{width:140px}
+  .controls input[type=range]{width:130px}
+  .controls select{background:#0e1418;color:#e6f0f4;border:1px solid #234;
+                   border-radius:4px;padding:4px 6px;font-family:monospace;font-size:12px}
   .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:#8aa;margin-top:8px}
   .legend .sw{display:inline-block;width:14px;height:14px;vertical-align:-2px;
               border-radius:2px;margin-right:4px}
+  .conn{font-size:11px;margin-left:8px}
+  .conn.on{color:#3c6}
+  .conn.off{color:#f88}
+  .conn.pending{color:#fc8}
 </style>
 </head>
 <body>
@@ -53,6 +60,8 @@
     </nav>
 </header>
 <main>
+
+    <div id="banner" class="warn" style="display:none"></div>
 
     <div class="card">
         <h2>Положение прибора на поле</h2>
@@ -69,9 +78,19 @@
         <canvas id="mapCanvas" width="800" height="500"></canvas>
 
         <div class="controls">
+            <label>Протокол:
+                <select id="protocolSelect">
+                    <option value="ajax">Ajax polling (250 мс)</option>
+                    <option value="sse">SSE (Server-Sent Events)</option>
+                    <option value="ws">WebSocket</option>
+                </select>
+            </label>
+            <span id="connStatus" class="conn pending">подключение…</span>
+        </div>
+
+        <div class="controls">
             <button onclick="resetView()">⤢ Авто-масштаб</button>
             <button onclick="centerOnDevice()">🎯 Центрировать</button>
-            <button class="orange" onclick="clearTrail()">🧹 Очистить след</button>
             <button class="red" onclick="doResetPos()">↺ Сброс позиции и поворота</button>
             <label>Zoom:
                 <input type="range" id="zoomSlider" min="0.2" max="15" step="0.1" value="2">
@@ -79,22 +98,25 @@
             </label>
             <label><input type="checkbox" id="showTrail" checked> След</label>
             <label><input type="checkbox" id="showGrid"  checked> Сетка</label>
+            <label><input type="checkbox" id="showAxes"  checked> Оси/подписи</label>
         </div>
 
         <div class="legend">
             <span><span class="sw" style="background:#3c6"></span>прибор (вершина = «вперёд»)</span>
             <span><span class="sw" style="background:#6cf"></span>след движения</span>
             <span><span class="sw" style="background:#484"></span>ноль (0, 0)</span>
+            <span>↑ север («вперёд») · → восток («вправо»)</span>
         </div>
 
         <div class="hint">
-            Колесо мыши — zoom к курсору. Перетаскивание — пан.<br>
-            Ориентация треугольника = <code>rotation_deg</code> (накопленный поворот с
-            deadband <code>rotDeadbandDeg</code>). Если треугольник «смотрит не туда» —
-            поменяйте «Инвертировать X/Y» в <a href="config.html">Настройках</a>: флаги
-            инвертируют и знак поворота.<br>
-            Позиция и след не «уплывают» в покое благодаря deadband-калибровке из
-            <a href="sensor.html">Live → «⏱ Калибровать покой + ноль»</a>.
+            Колесо мыши — zoom к курсору. Перетаскивание — панорама.<br>
+            <b>Оси:</b> «вперёд» — вверх, «вправо» — вправо. Если фактическое поведение
+            отличается — проверьте в Настройках <code>cameraMountRotationDeg</code> и
+            <code>invertDx/invertDy</code>: клиент мапит серверные <code>posX/posY</code>
+            на оси карты один к одному.<br>
+            <b>Протоколы:</b> Ajax — polling по таймеру. SSE и WebSocket — подписка на
+            поток, при каждом событии клиент запрашивает <code>/api/sensor/map</code>
+            (rate-limit 80 мс). Выбор запоминается в localStorage.
         </div>
     </div>
 
@@ -105,36 +127,54 @@
   var canvas = $('mapCanvas');
   var ctx = canvas.getContext('2d');
 
+  // ============================================================
+  // View state (мировые координаты карты)
+  // ============================================================
   var view = {
     offsetX: 0, offsetY: 0,
     scale: 2.0,
     autoFit: true
   };
 
-  var mapState = null;
-  var trail = [];
+  var mapState = null;   // последний ответ /api/sensor/map
+  var trail = [];        // точки {x, y, rot, t} — серверные координаты
 
-  // ------------------------------------------------------------
-  // Размер canvas с учётом DPR
-  // ------------------------------------------------------------
-  function resizeCanvas() {
-    var dpr = window.devicePixelRatio || 1;
-    var rect = canvas.getBoundingClientRect();
-    canvas.width  = Math.round(rect.width  * dpr);
-    canvas.height = Math.round(rect.height * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    render();
+  // ============================================================
+  // КЛЮЧЕВОЕ: преобразование серверных (posX, posY) → карта (mapX, mapY)
+  //
+  // Сервер:
+  //   posX = движение «вперёд(+)/назад(−)» в системе устройства
+  //   posY = движение «вправо(+)/влево(−)» в системе устройства
+  //
+  // На карте:
+  //   +mapX = вправо
+  //   +mapY = вверх
+  //
+  // Отсюда:
+  //   mapX = +posY   (вправо → вправо)
+  //   mapY = -posX   (вперёд(posX отрицательный) → mapY>0 → вверх)
+  // ============================================================
+  function serverToMap(posX, posY) {
+    return { x: posY, y: -posX };
   }
 
+  function trailPointToMap(tp) {
+    // tp = { x: posX_rel_zero, y: posY_rel_zero, rot, t }
+    return { x: tp.y, y: -tp.x, rot: tp.rot || 0, t: tp.t };
+  }
+
+  // ============================================================
+  // Мировые координаты → canvas (с флипом Y — «вверх» = вверх)
+  // ============================================================
   function cssW() { return canvas.getBoundingClientRect().width;  }
   function cssH() { return canvas.getBoundingClientRect().height; }
 
-  function worldToScreen(wx, wy) {
+  function worldToScreen(mapX, mapY) {
     var cx = cssW() / 2;
     var cy = cssH() / 2;
     return {
-      x: cx + (wx - view.offsetX) * view.scale,
-      y: cy - (wy - view.offsetY) * view.scale   // flip Y → «вверх» на карте
+      x: cx + (mapX - view.offsetX) * view.scale,
+      y: cy - (mapY - view.offsetY) * view.scale
     };
   }
 
@@ -147,16 +187,29 @@
     };
   }
 
-  // ------------------------------------------------------------
+  // ============================================================
+  // Canvas / DPR
+  // ============================================================
+  function resizeCanvas() {
+    var dpr = window.devicePixelRatio || 1;
+    var rect = canvas.getBoundingClientRect();
+    canvas.width  = Math.round(rect.width  * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    render();
+  }
+
+  // ============================================================
   // Авто-fit
-  // ------------------------------------------------------------
+  // ============================================================
   function autoFitBounds() {
     if (!mapState) return;
-    var pts = [{x:0, y:0}, {x: mapState.x_px||0, y: mapState.y_px||0}];
+    var pts = [{ x: 0, y: 0 }];
+    pts.push(serverToMap(mapState.x_px || 0, mapState.y_px || 0));
     var tail = trail.slice(-300);
-    for (var i = 0; i < tail.length; i++) pts.push(tail[i]);
+    for (var i = 0; i < tail.length; i++) pts.push(trailPointToMap(tail[i]));
 
-    var minX=0, maxX=0, minY=0, maxY=0;
+    var minX = 0, maxX = 0, minY = 0, maxY = 0;
     for (var i = 0; i < pts.length; i++) {
       if (pts[i].x < minX) minX = pts[i].x;
       if (pts[i].x > maxX) maxX = pts[i].x;
@@ -175,16 +228,16 @@
     $('zoomVal').textContent = view.scale.toFixed(1) + '×';
   }
 
-  // ------------------------------------------------------------
+  // ============================================================
   // Рисование
-  // ------------------------------------------------------------
+  // ============================================================
   function render() {
     if (!mapState) { clearCanvas(); return; }
     if (view.autoFit) autoFitBounds();
     clearCanvas();
     if ($('showGrid').checked) drawGrid();
     if ($('showTrail').checked) drawTrail();
-    drawOrigin();
+    if ($('showAxes').checked) drawOrigin();
     drawDevice();
   }
 
@@ -222,7 +275,7 @@
       ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
     }
 
-    // Оси
+    // оси
     ctx.strokeStyle = '#2a3542';
     ctx.lineWidth = 1.5;
     var xa = worldToScreen(0, minWY), xb = worldToScreen(0, maxWY);
@@ -230,7 +283,7 @@
     var ya = worldToScreen(minWX, 0), yb = worldToScreen(maxWX, 0);
     ctx.beginPath(); ctx.moveTo(ya.x, ya.y); ctx.lineTo(yb.x, yb.y); ctx.stroke();
 
-    // Подписи
+    // подписи
     ctx.fillStyle = '#5a6a7a';
     ctx.font = '10px monospace';
     ctx.textAlign = 'center';
@@ -258,7 +311,8 @@
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     for (var i = 1; i < trail.length; i++) {
-      var a = trail[i-1], b = trail[i];
+      var a = trailPointToMap(trail[i-1]);
+      var b = trailPointToMap(trail[i]);
       var p1 = worldToScreen(a.x, a.y);
       var p2 = worldToScreen(b.x, b.y);
       var age = trail.length - i;
@@ -286,54 +340,47 @@
   }
 
   function drawDevice() {
-    var p = worldToScreen(mapState.x_px || 0, mapState.y_px || 0);
+    var m = serverToMap(mapState.x_px || 0, mapState.y_px || 0);
+    var p = worldToScreen(m.x, m.y);
     var rot = mapState.rotation_deg || 0;
 
-    // В canvas Y растёт вниз; мы флипнули Y → «вверх» = -Y.
-    // rotation_deg = 0 → вершина смотрит вверх.
-    // Угол в canvas: -90° (вверх) + rotation_deg (по часовой).
+    // rot = 0 → «вперёд» = вверх (в canvas -90°)
     var tip = (-90 + rot) * Math.PI / 180;
 
     var size = 16;
     var x1 = p.x + Math.cos(tip) * size;
     var y1 = p.y + Math.sin(tip) * size;
 
-    var back = 2.6; // ≈150°
+    var back = 2.6;
     var x2 = p.x + Math.cos(tip + back) * size * 0.7;
     var y2 = p.y + Math.sin(tip + back) * size * 0.7;
     var x3 = p.x + Math.cos(tip - back) * size * 0.7;
     var y3 = p.y + Math.sin(tip - back) * size * 0.7;
 
-    // тень
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.beginPath();
     ctx.moveTo(x1+2, y1+2); ctx.lineTo(x2+2, y2+2); ctx.lineTo(x3+2, y3+2);
     ctx.closePath(); ctx.fill();
 
-    // тело
     ctx.fillStyle = '#3c6';
     ctx.beginPath();
     ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x3, y3);
     ctx.closePath(); ctx.fill();
 
-    // контур
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // вершина — жирная точка для акцента
     ctx.fillStyle = '#fff';
     ctx.beginPath();
     ctx.arc(x1, y1, 2.5, 0, 2 * Math.PI);
     ctx.fill();
 
-    // центр
     ctx.fillStyle = '#0b0f12';
     ctx.beginPath();
     ctx.arc(p.x, p.y, 2.5, 0, 2 * Math.PI);
     ctx.fill();
 
-    // проекция «вперёд»
     ctx.strokeStyle = 'rgba(108,204,255,0.5)';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -342,9 +389,9 @@
     ctx.stroke();
   }
 
-  // ------------------------------------------------------------
-  // Панорама мышью
-  // ------------------------------------------------------------
+  // ============================================================
+  // Панорама мышью / тач
+  // ============================================================
   var drag = null;
   canvas.addEventListener('mousedown', function(e){
     drag = { sx: e.clientX, sy: e.clientY, ox: view.offsetX, oy: view.offsetY };
@@ -360,7 +407,6 @@
   });
   window.addEventListener('mouseup', function(){ drag = null; });
 
-  // Touch
   var touchStart = null;
   canvas.addEventListener('touchstart', function(e){
     if (e.touches.length === 1) {
@@ -379,7 +425,6 @@
   }, {passive:false});
   canvas.addEventListener('touchend', function(){ touchStart = null; });
 
-  // Wheel zoom к курсору
   canvas.addEventListener('wheel', function(e){
     e.preventDefault();
     var rect = canvas.getBoundingClientRect();
@@ -388,7 +433,6 @@
     var w = screenToWorld(mx, my);
     var factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
     view.scale = Math.max(0.2, Math.min(15, view.scale * factor));
-    // сохранить точку под курсором
     var cx = cssW()/2, cy = cssH()/2;
     view.offsetX = w.x - (mx - cx) / view.scale;
     view.offsetY = w.y + (my - cy) / view.scale;
@@ -398,22 +442,19 @@
     render();
   }, {passive:false});
 
-  // ------------------------------------------------------------
+  // ============================================================
   // Управление
-  // ------------------------------------------------------------
+  // ============================================================
   function resetView() {
     view.autoFit = true;
     render();
   }
   function centerOnDevice() {
     if (!mapState) return;
+    var m = serverToMap(mapState.x_px || 0, mapState.y_px || 0);
     view.autoFit = false;
-    view.offsetX = mapState.x_px || 0;
-    view.offsetY = mapState.y_px || 0;
-    render();
-  }
-  function clearTrail() {
-    trail = [];
+    view.offsetX = m.x;
+    view.offsetY = m.y;
     render();
   }
   function doResetPos() {
@@ -424,34 +465,187 @@
     xhr.send();
   }
 
-  // ------------------------------------------------------------
-  // Polling
-  // ------------------------------------------------------------
+  // ============================================================
+  // Загрузка /api/sensor/map
+  // ============================================================
+  function applyMapResponse(st) {
+    mapState = st;
+    trail = (st.trail && st.trail.length > 0) ? st.trail.slice() : [];
+    $('stX').textContent      = (st.x_px || 0).toFixed(2);
+    $('stY').textContent      = (st.y_px || 0).toFixed(2);
+    $('stRot').textContent    = (st.rotation_deg || 0).toFixed(1);
+    $('stDb').textContent     = (st.deadband_px || 0).toFixed(3);
+    $('stTrail').textContent  = (st.trail_count || 0);
+    $('stCal').textContent    = st.calibrated ? '✓' : '—';
+    render();
+  }
+
+  var lastMapOk = null;
+  function showBanner(kind, text) {
+    var b = $('banner');
+    if (!text) { b.style.display = 'none'; return; }
+    b.style.display = '';
+    b.className = 'warn';
+    b.textContent = text;
+  }
+
   function poll() {
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '/api/sensor/map', true);
+    xhr.timeout = 3000;
     xhr.onload = function() {
-      if (xhr.status !== 200) return;
-      try {
-        var st = JSON.parse(xhr.responseText);
-        mapState = st;
-        if (st.trail && st.trail.length > 0) {
-          trail = st.trail.slice();
-        } else {
-          trail = [];
-        }
-        $('stX').textContent      = (st.x_px || 0).toFixed(2);
-        $('stY').textContent      = (st.y_px || 0).toFixed(2);
-        $('stRot').textContent    = (st.rotation_deg || 0).toFixed(1);
-        $('stDb').textContent     = (st.deadband_px || 0).toFixed(3);
-        $('stTrail').textContent  = (st.trail_count || 0);
-        $('stCal').textContent    = st.calibrated ? '✓' : '—';
-        render();
-      } catch (e) {}
+      if (xhr.status === 200) {
+        lastMapOk = true;
+        showBanner(null, '');
+        try { applyMapResponse(JSON.parse(xhr.responseText)); } catch (e) {}
+      } else if (xhr.status === 404) {
+        lastMapOk = false;
+        showBanner('err',
+            'GET /api/sensor/map → 404. Пересоберите APK ' +
+            '(Build → Clean → Rebuild) — на сервере нет эндпоинта /map ' +
+            'или не исправлен findHandler в HttpServer.java.');
+      } else {
+        lastMapOk = false;
+        showBanner('err', 'GET /api/sensor/map → HTTP ' + xhr.status);
+      }
+    };
+    xhr.onerror = function() {
+      lastMapOk = false;
+      showBanner('err', 'Сервер не отвечает');
+    };
+    xhr.ontimeout = function() {
+      lastMapOk = false;
+      showBanner('err', 'Таймаут запроса /api/sensor/map');
     };
     xhr.send();
   }
 
+  // ============================================================
+  // ПРОТОКОЛЫ: Ajax / SSE / WebSocket
+  // ============================================================
+  var protocol    = 'ajax';
+  var ajaxTimer   = null;
+  var sseSource   = null;
+  var wsConn      = null;
+  var lastFetch   = 0;
+  var MIN_MAP_INTERVAL = 80;  // rate-limit для SSE/WS
+
+  function setConnStatus(kind, text) {
+    var el = $('connStatus');
+    el.className = 'conn ' + kind;
+    el.textContent = text;
+  }
+
+  function stopAllTransports() {
+    if (ajaxTimer)  { clearInterval(ajaxTimer);  ajaxTimer  = null; }
+    if (sseSource)  { try { sseSource.close(); } catch (e) {} sseSource = null; }
+    if (wsConn)     { try { wsConn.close();    } catch (e) {} wsConn    = null; }
+  }
+
+  function startAjax() {
+    setConnStatus('pending', 'ajax: запуск…');
+    poll();
+    ajaxTimer = setInterval(function() {
+      poll();
+      setConnStatus(lastMapOk ? 'on' : 'off',
+              lastMapOk ? 'ajax: OK' : 'ajax: ошибка');
+    }, 250);
+  }
+
+  function startSse() {
+    setConnStatus('pending', 'sse: подключение…');
+    try {
+      var es = new EventSource('/api/sensor/sse');
+      sseSource = es;
+      es.onopen = function() {
+        setConnStatus('on', 'sse: подключено');
+        poll();
+      };
+      es.addEventListener('reading', function() {
+        var now = Date.now();
+        if (now - lastFetch < MIN_MAP_INTERVAL) return;
+        lastFetch = now;
+        poll();
+      });
+      es.onerror = function() {
+        setConnStatus('off', 'sse: ошибка (авто-реконнект)');
+      };
+    } catch (e) {
+      setConnStatus('off', 'sse: не поддерживается');
+      setProtocol('ajax');
+    }
+  }
+
+  function startWs() {
+    setConnStatus('pending', 'ws: получение порта…');
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/sensor/status', true);
+    xhr.onload = function() {
+      if (xhr.status !== 200) {
+        setConnStatus('off', 'ws: статус-сервер недоступен');
+        setProtocol('ajax');
+        return;
+      }
+      try {
+        var st = JSON.parse(xhr.responseText);
+        var wsPort = st.wsPort;
+        if (!wsPort || wsPort < 1) {
+          setConnStatus('off', 'ws: отключён в настройках');
+          setProtocol('ajax');
+          return;
+        }
+        var url = 'ws://' + location.hostname + ':' + wsPort + '/';
+        setConnStatus('pending', 'ws: подключение к ' + wsPort + '…');
+        var ws = new WebSocket(url);
+        wsConn = ws;
+        ws.onopen = function() {
+          setConnStatus('on', 'ws: подключено');
+          poll();
+        };
+        ws.onmessage = function() {
+          var now = Date.now();
+          if (now - lastFetch < MIN_MAP_INTERVAL) return;
+          lastFetch = now;
+          poll();
+        };
+        ws.onclose = function() {
+          setConnStatus('off', 'ws: отключено (переподключение через 3 с)');
+          if (protocol === 'ws') {
+            setTimeout(function() { if (protocol === 'ws') startWs(); }, 3000);
+          }
+        };
+        ws.onerror = function() {
+          setConnStatus('off', 'ws: ошибка соединения');
+        };
+      } catch (e) {
+        setConnStatus('off', 'ws: ошибка разбора статуса');
+        setProtocol('ajax');
+      }
+    };
+    xhr.onerror = function() {
+      setConnStatus('off', 'ws: сеть недоступна');
+      setProtocol('ajax');
+    };
+    xhr.send();
+  }
+
+  function setProtocol(p) {
+    protocol = p;
+    try { localStorage.setItem('map_protocol', p); } catch (e) {}
+    $('protocolSelect').value = p;
+    stopAllTransports();
+    lastFetch = 0;
+    if (p === 'ajax') startAjax();
+    else if (p === 'sse') startSse();
+    else if (p === 'ws') startWs();
+  }
+
+  // ============================================================
+  // UI event handlers
+  // ============================================================
+  $('protocolSelect').addEventListener('change', function(){
+    setProtocol(this.value);
+  });
   $('zoomSlider').addEventListener('input', function(){
     view.scale = parseFloat(this.value);
     view.autoFit = false;
@@ -460,16 +654,23 @@
   });
   $('showTrail').addEventListener('change', render);
   $('showGrid').addEventListener('change', render);
+  $('showAxes').addEventListener('change', render);
+
+  window.resetView      = resetView;
+  window.centerOnDevice = centerOnDevice;
+  window.doResetPos     = doResetPos;
 
   window.addEventListener('resize', resizeCanvas);
-  window.resetView        = resetView;
-  window.centerOnDevice   = centerOnDevice;
-  window.clearTrail       = clearTrail;
-  window.doResetPos       = doResetPos;
 
+  // ============================================================
+  // Start
+  // ============================================================
   resizeCanvas();
-  poll();
-  setInterval(poll, 250);
+
+  // восстановить выбор протокола
+  var saved = null;
+  try { saved = localStorage.getItem('map_protocol'); } catch (e) {}
+  setProtocol(saved === 'sse' || saved === 'ws' ? saved : 'ajax');
 })();
 </script>
 </body>
