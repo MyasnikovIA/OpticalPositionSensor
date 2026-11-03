@@ -163,6 +163,50 @@ public class RestHandler implements HttpHandler {
                 HttpUtil.sendJson(ex, 200, o.toString());
                 return;
             }
+            // ---- Калибровка покоя ----
+            if ("/api/sensor/calib/start".equals(path) && "POST".equals(method)) {
+                String body = HttpUtil.readBody(ex, 4096);
+                boolean thenZero = false;
+                try {
+                    if (!body.isEmpty()) {
+                        JSONObject req = new JSONObject(body);
+                        thenZero = req.optBoolean("thenZero", false);
+                    }
+                } catch (Exception ignored) {}
+                svc.startCalibStatic(thenZero);
+                JSONObject o = new JSONObject();
+                o.put("ok", true);
+                o.put("calib", svc.calibStatusJson());
+                HttpUtil.sendJson(ex, 200, o.toString());
+                return;
+            }
+
+            if ("/api/sensor/calib/apply".equals(path) && "POST".equals(method)) {
+                svc.applyCalibNow();
+                JSONObject o = new JSONObject();
+                o.put("ok", true);
+                o.put("calib", svc.calibStatusJson());
+                o.put("position", svc.positionJsonPublic());
+                HttpUtil.sendJson(ex, 200, o.toString());
+                return;
+            }
+
+            if ("/api/sensor/calib/clear".equals(path) && "POST".equals(method)) {
+                svc.clearCalibStatic();
+                JSONObject o = new JSONObject();
+                o.put("ok", true);
+                o.put("calib", svc.calibStatusJson());
+                HttpUtil.sendJson(ex, 200, o.toString());
+                return;
+            }
+
+            if ("/api/sensor/calib/status".equals(path) && "GET".equals(method)) {
+                JSONObject o = new JSONObject();
+                o.put("ok", true);
+                o.put("calib", svc.calibStatusJson());
+                HttpUtil.sendJson(ex, 200, o.toString());
+                return;
+            }
             HttpUtil.sendError(ex, 404, "Unknown: " + path);
         } catch (Exception e) {
             HttpUtil.sendError(ex, 500, e.getMessage());

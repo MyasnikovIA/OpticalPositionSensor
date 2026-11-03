@@ -16,6 +16,7 @@
   .banner{padding:10px 12px;border-radius:6px;margin-bottom:12px;font-size:13px}
   .banner.err{background:#4a1c1c;color:#fdd;border-left:4px solid #d33}
   .banner.info{background:#1c2a4a;color:#ccf;border-left:4px solid #36c}
+  .banner.ok{background:#1c4a2c;color:#cfc;border-left:4px solid #3c3}
   .card{background:#182028;border-radius:8px;padding:12px;margin-bottom:12px}
   .card h2{font-size:14px;margin:0 0 10px;color:#adf}
   .row{display:flex;gap:10px;flex-wrap:wrap}
@@ -23,9 +24,9 @@
   .k{color:#8aa;font-size:11px;text-transform:uppercase}
   .v{font-size:18px;color:#6cf}
   .v.small{font-size:14px;color:#adf}
-  .v.big{font-size:26px;color:#6cf;font-weight:bold}
+  .v.big{font-size:24px;color:#6cf;font-weight:bold}
   button{background:#248;color:#fff;border:0;border-radius:6px;padding:8px 14px;
-         cursor:pointer;font-family:monospace;font-size:13px;margin-right:6px}
+         cursor:pointer;font-family:monospace;font-size:13px;margin-right:6px;margin-bottom:6px}
   button:active{background:#369}
   button.green{background:#285}
   button.orange{background:#a63}
@@ -57,6 +58,13 @@
   .posItem{background:#0e1418;border-radius:8px;padding:10px;text-align:center}
   .posItem .k{font-size:10px;color:#8aa;text-transform:uppercase;margin-bottom:4px}
   .posItem .v{font-size:22px;color:#6cf;font-weight:bold}
+  .calibBar{background:#0e1418;border-radius:6px;padding:8px;font-size:12px;
+            color:#8aa;margin:8px 0}
+  .calibBar .progress{height:6px;background:#234;border-radius:3px;margin-top:6px;
+                      overflow:hidden}
+  .calibBar .fill{height:100%;background:#3c6;transition:width 0.15s linear}
+  .calibBar.done{color:#cfc}
+  .calibBar.aborted{color:#fcc}
 </style>
 </head>
 <body>
@@ -73,7 +81,7 @@
     <div id="banner" class="banner err" style="display:none"></div>
 
     <!-- ================= ПОДКЛЮЧЕНИЕ ================= -->
-    <div class="card" id="connectCard">
+    <div class="card">
         <h2>Подключение</h2>
         <div style="color:#8aa;font-size:11px;text-transform:uppercase;margin-bottom:4px">
             Адрес для подключения
@@ -86,11 +94,10 @@
         <div style="margin-top:10px;color:#8aa;font-size:11px">
             <div>IP-адрес: <span id="ipText" style="color:#adf">—</span></div>
             <div>Активный порт: <span id="portText" style="color:#adf">—</span></div>
-            <div>Устройство доступно с других ПК/телефонов в той же сети Wi-Fi.</div>
         </div>
     </div>
 
-    <!-- ================= ПОЗИЦИЯ И КАЛИБРОВКА ================= -->
+    <!-- ================= ПОЗИЦИЯ ================= -->
     <div class="card">
         <h2>Позиция от нуля</h2>
 
@@ -102,34 +109,40 @@
         </div>
 
         <div style="margin-bottom:8px">
-            <button class="green big" onclick="doZero()">⦿ Установить ноль здесь</button>
-            <button class="orange big" onclick="doResetPos()">↺ Сбросить накопление</button>
+            <button class="green big" onclick="doZero()">🎯 Установить ноль</button>
+            <button class="orange big" onclick="doCalib(true)">⏱ Калибровать покой + ноль</button>
+            <button onclick="doResetPos()">↺ Сбросить накопление</button>
+        </div>
+
+        <div class="calibBar" id="calibBar">
+            Калибровка: <span id="calibStatus">—</span>
+            <div class="progress" id="calibProg" style="display:none">
+                <div class="fill" id="calibFill" style="width:0%"></div>
+            </div>
+            <div id="calibDetails" style="margin-top:6px;font-size:11px"></div>
         </div>
 
         <div class="hint">
-            <b>Установить ноль</b> — текущее физическое положение становится точкой (0,0).
-            Дальнейшие X/Y измеряются относительно неё.<br>
-            <b>Сбросить накопление</b> — обнуляет и накопленное смещение, и точку отсчёта
-            (лечит «уплывание» из-за накопления ошибок).<br>
-            Ноль сохраняется до остановки камеры. При «Стоп → Старт» сбрасывается.
-        </div>
-
-        <div class="hint" style="margin-top:8px">
-            API: <code>POST /api/sensor/zero</code> · <code>POST /api/sensor/reset</code>
+            <b>🎯 Установить ноль</b> — мгновенно: текущее положение становится (0,0).<br>
+            <b>⏱ Калибровать покой + ноль</b> — 2 секунды замера шума + ноль
+            (не двигайте устройство!). После этого позиция <b>не уплывает</b>.<br>
+            <b>↺ Сбросить накопление</b> — обнуляет и накопленное смещение, и точку отсчёта
+            (лечит дрейф после долгой работы).<br>
+            <br>
+            Рекомендация: сначала «Калибровать покой + ноль», при смене условий — заново.
+            При чистом «Установить ноль» без калибровки позиция может уплывать из-за шума.
         </div>
     </div>
 
-    <!-- ================= ИЗОБРАЖЕНИЕ С КАМЕРЫ ================= -->
+    <!-- ================= КАМЕРА ================= -->
     <div class="card">
         <h2>Изображение с камеры</h2>
         <div id="camWrap">
-            <img id="camStream"
-                 src="/api/sensor/stream.mjpg"
-                 alt="camera" />
+            <img id="camStream" src="/api/sensor/stream.mjpg" alt="camera" />
         </div>
         <div id="camHint">
             MJPEG: <code>/api/sensor/stream.mjpg</code> •
-            один кадр: <code>/api/sensor/snapshot.jpg</code> •
+            кадр: <code>/api/sensor/snapshot.jpg</code> •
             фичи: <code>/api/sensor/debug.jpg</code>
         </div>
     </div>
@@ -141,16 +154,14 @@
             <div><span class="lbl">Статус:</span> <span id="statePill"></span></div>
             <div><span class="lbl">Кадр:</span> <span id="frameText">—</span></div>
         </div>
-        <div id="pubLine">
-            Публикация: <span id="pubInfo">—</span>
-        </div>
+        <div id="pubLine">Публикация: <span id="pubInfo">—</span></div>
         <div style="margin-bottom:10px">
             <button id="btnStart" class="green" onclick="doStart()">▶ Запустить</button>
             <button id="btnStop"  class="red"   onclick="doStop()">■ Остановить</button>
         </div>
     </div>
 
-    <!-- ================= ДВИЖЕНИЕ (за кадр) ================= -->
+    <!-- ================= ДВИЖЕНИЕ ================= -->
     <div class="card">
         <h2>Движение за кадр</h2>
         <div class="row">
@@ -162,7 +173,7 @@
         </div>
     </div>
 
-    <!-- ================= ФОНАРИК + КАЧЕСТВО ================= -->
+    <!-- ================= ФОНАРИК ================= -->
     <div class="card">
         <h2>Фонарик и качество</h2>
         <div class="row">
@@ -177,7 +188,6 @@
             <button onclick="setFlash('on')">Фонарь ON</button>
             <button onclick="setFlash('auto')">Фонарь AUTO</button>
         </div>
-        <pre id="flashDebug" style="margin-top:10px;font-size:11px;color:#8aa;max-height:180px">—</pre>
     </div>
 
     <!-- ================= JSON ================= -->
@@ -192,22 +202,20 @@
   var $ = function(id){ return document.getElementById(id); };
   var es = null;
   var autoStarted = false;
+  var calibPollTimer = null;
 
   function showBanner(kind, text) {
     var b = $('banner');
     if (!text) { b.style.display = 'none'; return; }
     b.style.display = '';
-    b.className = 'banner ' + (kind === 'info' ? 'info' : 'err');
+    b.className = 'banner ' + (kind || 'err');
     b.textContent = text;
   }
 
   function legacyCopy(text) {
     var tmp = document.createElement('textarea');
-    tmp.value = text;
-    tmp.style.position = 'fixed';
-    tmp.style.left = '-9999px';
-    document.body.appendChild(tmp);
-    tmp.select();
+    tmp.value = text; tmp.style.position = 'fixed'; tmp.style.left = '-9999px';
+    document.body.appendChild(tmp); tmp.select();
     try { document.execCommand('copy'); } catch (e) {}
     document.body.removeChild(tmp);
     flashCopied();
@@ -230,9 +238,6 @@
     legacyCopy(text);
   }
 
-  // ------------------------------------------------------------
-  // Состояние, поля
-  // ------------------------------------------------------------
   function setState(running) {
     var p = $('statePill');
     if (running) { p.className = 'pill on';  p.textContent = 'RUNNING'; }
@@ -253,7 +258,6 @@
     if (typeof f.lux === 'number' && f.lux >= 0) {
       $('lux').textContent = f.lux.toFixed(0) + ' lx';
     }
-    $('flashDebug').textContent = JSON.stringify(f, null, 2);
   }
 
   function renderPosition(p) {
@@ -264,6 +268,32 @@
       $('posDist').textContent = p.distance_from_zero_px.toFixed(2);
     if (typeof p.direction_from_zero_deg === 'number')
       $('posDir').textContent = p.direction_from_zero_deg.toFixed(1) + '°';
+  }
+
+  function renderCalib(c) {
+    if (!c) return;
+    var bar = $('calibBar');
+    var st  = c.status || 'idle';
+    bar.className = 'calibBar';
+    if (st === 'sampling') {
+      var pct = Math.min(100, Math.round(100.0 * (c.samples||0) / Math.max(1, c.targetSamples||60)));
+      $('calibProg').style.display = '';
+      $('calibFill').style.width = pct + '%';
+      $('calibStatus').textContent = '⏱ замер ' + (c.samples||0) + '/' + (c.targetSamples||60)
+                                     + ' (' + pct + '%)';
+    } else {
+      $('calibProg').style.display = 'none';
+      if (st === 'done')         { $('calibStatus').textContent = '✓ калибровка применена'; bar.className += ' done'; }
+      else if (st === 'aborted_motion') { $('calibStatus').textContent = '✗ прервано: движение'; bar.className += ' aborted'; }
+      else if (st === 'idle')    { $('calibStatus').textContent = 'не откалибровано'; }
+      else                       { $('calibStatus').textContent = st; }
+    }
+    var det = '';
+    det += 'bias X = ' + (c.posBiasX||0).toFixed(3) + ' px, '
+         + 'bias Y = ' + (c.posBiasY||0).toFixed(3) + ' px<br>';
+    det += 'deadband = ' + (c.posDeadbandPx||0).toFixed(3) + ' px · ';
+    det += 'calibrated: ' + (c.posCalibrated ? '✓' : '—');
+    $('calibDetails').innerHTML = det;
   }
 
   function renderReading(r) {
@@ -283,9 +313,6 @@
     $('json').textContent = JSON.stringify(r, null, 2);
   }
 
-  // ------------------------------------------------------------
-  // SSE
-  // ------------------------------------------------------------
   function connectSSE() {
     if (es) { try { es.close(); } catch (e) {} es = null; }
     try {
@@ -296,9 +323,6 @@
     } catch (e) { setTimeout(connectSSE, 3000); }
   }
 
-  // ------------------------------------------------------------
-  // Статус сервиса (polling раз в 2 сек)
-  // ------------------------------------------------------------
   function refreshStatus() {
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '/api/sensor/status', true);
@@ -312,6 +336,7 @@
         }
         if (st.flashlight) updateFlashUi(st.flashlight);
         if (st.position)   renderPosition(st.position);
+        if (st.calib)      renderCalib(st.calib);
 
         var ip = st.localIp || '—';
         var port = st.httpPortActive || st.httpPort || 8080;
@@ -333,16 +358,9 @@
         } else {
           var ago = st.lastPublishMs
               ? Math.round((new Date().getTime()) - st.lastPublishMs) : -1;
-          var pubSeq = st.publishSeq || 0;
-          var skipped = st.skippedReadings || 0;
-          info = 'публикаций: ' + pubSeq + ' • пропущено: ' + skipped;
-          if (ago >= 0) {
-            info += ' • последняя '
-                  + (ago < 1000 ? 'сейчас' : (ago / 1000).toFixed(1) + ' с назад');
-          }
-          if (st.publishHeartbeatMs) {
-            info += ' • heartbeat ' + (st.publishHeartbeatMs / 1000).toFixed(0) + ' c';
-          }
+          info = 'публикаций: ' + (st.publishSeq||0)
+               + ' • пропущено: ' + (st.skippedReadings||0);
+          if (ago >= 0) info += ' • последняя ' + (ago < 1000 ? 'сейчас' : (ago/1000).toFixed(1)+' с назад');
         }
         $('pubInfo').textContent = info;
 
@@ -364,21 +382,16 @@
     xhr.send();
   }
 
-  // ------------------------------------------------------------
-  // Управление камерой
-  // ------------------------------------------------------------
   function doStart() {
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/sensor/start', true);
     xhr.onload = function() { refreshStatus(); };
-    xhr.onerror = function() { showBanner('err', 'Ошибка сети при запуске'); };
     xhr.send();
   }
   function doStop() {
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/sensor/stop', true);
     xhr.onload = function() { refreshStatus(); };
-    xhr.onerror = function() { showBanner('err', 'Ошибка сети при остановке'); };
     xhr.send();
   }
   function setFlash(mode) {
@@ -389,13 +402,9 @@
       try { updateFlashUi(JSON.parse(xhr.responseText)); } catch (e) {}
       refreshStatus();
     };
-    xhr.onerror = function() { $('flashDebug').textContent = 'network error'; };
     xhr.send(JSON.stringify({mode: mode}));
   }
 
-  // ------------------------------------------------------------
-  // НУЛЬ И СБРОС
-  // ------------------------------------------------------------
   function doZero() {
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/sensor/zero', true);
@@ -403,15 +412,70 @@
       try {
         var j = JSON.parse(xhr.responseText);
         if (j && j.ok) {
-          showBanner('info', 'Ноль установлен: X=0, Y=0');
+          showBanner('ok', 'Ноль установлен: X=0, Y=0');
           setTimeout(function(){ showBanner(null, ''); }, 2500);
           if (j.position) renderPosition(j.position);
         }
       } catch (e) {}
       refreshStatus();
     };
-    xhr.onerror = function() { showBanner('err', 'Ошибка сети при установке нуля'); };
     xhr.send();
+  }
+
+  function doCalib(thenZero) {
+    if (!confirm((thenZero
+        ? 'Запустить калибровку покоя + установить ноль?\n\n'
+        : 'Запустить калибровку покоя?\n\n')
+        + 'Не двигайте устройство ~2 секунды после подтверждения.')) return;
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/calib/start', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onload = function() {
+      try {
+        var j = JSON.parse(xhr.responseText);
+        if (j && j.ok) {
+          showBanner('info', 'Калибровка… не двигайте устройство 2 сек');
+          if (j.calib) renderCalib(j.calib);
+        }
+      } catch (e) {}
+      pollCalib();
+    };
+    xhr.send(JSON.stringify({thenZero: !!thenZero}));
+  }
+
+  function pollCalib() {
+    if (calibPollTimer) return;
+    var startTime = Date.now();
+    calibPollTimer = setInterval(function() {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/sensor/calib/status', true);
+      xhr.onload = function() {
+        try {
+          var j = JSON.parse(xhr.responseText);
+          if (j && j.calib) renderCalib(j.calib);
+          var st = j && j.calib && j.calib.status;
+          if (st === 'done' || st === 'aborted_motion' || st === 'error_too_few') {
+            clearInterval(calibPollTimer);
+            calibPollTimer = null;
+            if (st === 'done') {
+              showBanner('ok', 'Калибровка завершена. Ноль установлен.');
+              setTimeout(function(){ showBanner(null, ''); }, 3500);
+              refreshStatus();
+            } else if (st === 'aborted_motion') {
+              showBanner('err', 'Калибровка прервана: было движение. Повторите.');
+            } else {
+              showBanner('err', 'Калибровка не удалась: мало сэмплов.');
+            }
+          }
+          if (Date.now() - startTime > 15000) {
+            clearInterval(calibPollTimer);
+            calibPollTimer = null;
+          }
+        } catch (e) {}
+      };
+      xhr.send();
+    }, 250);
   }
 
   function doResetPos() {
@@ -422,14 +486,13 @@
       try {
         var j = JSON.parse(xhr.responseText);
         if (j && j.ok) {
-          showBanner('info', 'Позиция сброшена');
+          showBanner('ok', 'Позиция сброшена');
           setTimeout(function(){ showBanner(null, ''); }, 2500);
           if (j.position) renderPosition(j.position);
         }
       } catch (e) {}
       refreshStatus();
     };
-    xhr.onerror = function() { showBanner('err', 'Ошибка сети при сбросе позиции'); };
     xhr.send();
   }
 
@@ -437,12 +500,10 @@
   window.doStop         = doStop;
   window.setFlash       = setFlash;
   window.doZero         = doZero;
+  window.doCalib        = doCalib;
   window.doResetPos     = doResetPos;
   window.copyConnectUrl = copyConnectUrl;
 
-  // ------------------------------------------------------------
-  // MJPEG-превью с fallback на JPEG-опрос
-  // ------------------------------------------------------------
   (function setupCameraPreview() {
     var img  = $('camStream');
     var hint = $('camHint');

@@ -23,6 +23,9 @@ import androidx.core.app.NotificationCompat;
 import org.json.JSONObject;
 
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -104,6 +107,20 @@ public class SensorService extends Service {
 
     private final SimpleDateFormat iso = new SimpleDateFormat(
             "yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US);
+
+    // ---- Калибровка покоя ----
+    private final Object calibLock = new Object();
+    private final List<double[]> calibSamples = new ArrayList<>();
+    private volatile boolean calibActive = false;
+    private volatile boolean calibPendingZero = false;
+    private volatile long    calibStartMs = 0;
+    private volatile String  calibStatus = "idle";
+    private static final int    CALIB_TARGET_SAMPLES = 60;    // ~2 сек при 30fps
+    private static final long   CALIB_TIMEOUT_MS      = 5000;
+    private static final double CALIB_REJECT_PX       = 5.0;  // «пользователь двинул»
+
+    // ---- Список разрешений камеры (кэш) ----
+    private volatile org.json.JSONArray cachedCameraSizes = null;
 
     // ==============================================================
     // Lifecycle
@@ -233,7 +250,143 @@ public class SensorService extends Service {
 
     /** Для RestHandler: публичный доступ. */
     public JSONObject positionJsonPublic() { return positionJson(); }
+// ==============================================================
+// Калибровка покоя (static-point calibration)
+// ==============================================================
 
+    public synchronized void startCalibStatic(boolean thenZero) {
+        synchronized (calibLock) {
+            calibSamples.clear();
+            calibActive = true;
+            calibPendingZero = thenZero;
+            calibStartMs = System.currentTimeMillis();
+            calibStatus = "sampling";
+        }
+        Log.i(TAG, "Calib start, thenZero=" + thenZero
+                + ", target=" + CALIB_TARGET_SAMPLES);
+    }
+
+    public synchronized void applyCalibNow() {
+        synchronized (calibLock) {
+            if (calibSamples.size() < 5) {
+                calibStatus = "too_few_samples";
+                calibActive = false;
+                return;
+            }
+            applyCalibFromSamples();
+        }
+    }
+
+    public synchronized void clearCalibStatic() {
+        synchronized (calibLock) {
+            calibSamples.clear();
+            calibActive = false;
+            calibPendingZero = false;
+            calibStatus = "idle";
+            config.posBiasX      = 0.0;
+            config.posBiasY      = 0.0;
+            config.posDeadbandPx = 0.15;
+            config.posCalibrated = false;
+            try { ConfigStore.save(getApplicationContext(), config); }
+            catch (Exception e) { Log.w(TAG, "save calib clear", e); }
+        }
+        Log.i(TAG, "Calibration cleared");
+    }
+
+    private void collectCalibSample(double dx, double dy) {
+        synchronized (calibLock) {
+            if (!calibActive) return;
+
+            // Аборт при явном движении
+            if (Math.hypot(dx, dy) > CALIB_REJECT_PX) {
+                calibSamples.clear();
+                calibActive = false;
+                calibPendingZero = false;
+                calibStatus = "aborted_motion";
+                Log.w(TAG, "Calib aborted: motion detected");
+                return;
+            }
+
+            calibSamples.add(new double[]{dx, dy});
+
+            boolean targetReached = calibSamples.size() >= CALIB_TARGET_SAMPLES;
+            boolean timeout = (System.currentTimeMillis() - calibStartMs) >= CALIB_TIMEOUT_MS;
+            if (targetReached || timeout) {
+                applyCalibFromSamples();
+            }
+        }
+    }
+
+    private void applyCalibFromSamples() {
+        int n = calibSamples.size();
+        if (n < 3) {
+            calibStatus = "error_too_few";
+            calibActive = false;
+            return;
+        }
+
+        double sumX = 0, sumY = 0;
+        for (double[] s : calibSamples) { sumX += s[0]; sumY += s[1]; }
+        double meanX = sumX / n;
+        double meanY = sumY / n;
+
+        double varX = 0, varY = 0;
+        for (double[] s : calibSamples) {
+            varX += (s[0] - meanX) * (s[0] - meanX);
+            varY += (s[1] - meanY) * (s[1] - meanY);
+        }
+        double stdX = Math.sqrt(varX / Math.max(1, n - 1));
+        double stdY = Math.sqrt(varY / Math.max(1, n - 1));
+        double std  = Math.max(stdX, stdY);
+
+        config.posBiasX      = meanX;
+        config.posBiasY      = meanY;
+        // 3-сигма, но не меньше 0.05 и не больше 2.0
+        config.posDeadbandPx = Math.max(0.05, Math.min(2.0, 3.0 * std));
+        config.posCalibrated = true;
+
+        try { ConfigStore.save(getApplicationContext(), config); }
+        catch (Exception e) { Log.w(TAG, "save calib", e); }
+
+        boolean setZeroAfter = calibPendingZero;
+        calibPendingZero = false;
+        calibSamples.clear();
+        calibActive = false;
+        calibStatus = "done";
+
+        if (setZeroAfter) {
+            synchronized (positionLock) {
+                zeroX = posX;
+                zeroY = posY;
+                zeroSetAtMs = System.currentTimeMillis();
+            }
+            forcePublish = true;
+        }
+
+        Log.i(TAG, "Calib done: n=" + n
+                + " bias=(" + round(meanX,3) + "," + round(meanY,3) + ")"
+                + " std=(" + round(stdX,3) + "," + round(stdY,3) + ")"
+                + " deadband=" + round(config.posDeadbandPx,3)
+                + " thenZero=" + setZeroAfter);
+    }
+
+    public JSONObject calibStatusJson() {
+        try {
+            JSONObject o = new JSONObject();
+            synchronized (calibLock) {
+                o.put("status", calibStatus);
+                o.put("active", calibActive);
+                o.put("samples", calibSamples.size());
+                o.put("targetSamples", CALIB_TARGET_SAMPLES);
+                o.put("pendingZero", calibPendingZero);
+            }
+            o.put("posBiasX",        config.posBiasX);
+            o.put("posBiasY",        config.posBiasY);
+            o.put("posDeadbandPx",   config.posDeadbandPx);
+            o.put("posCalibrated",   config.posCalibrated);
+            return o;
+        } catch (Exception e) { return new JSONObject(); }
+    }
     public SnapshotProvider getSnapshotProvider() { return snapshotProvider; }
 
     public synchronized void patchConfig(JSONObject patch) {
@@ -378,7 +531,8 @@ public class SensorService extends Service {
                 config.targetWidth, config.searchRadius, config.blockSize,
                 config.flowMinVariance, config.flowMinGradient, config.maxSadPx,
                 config.flowSubpixel, config.flowTemporalSmoothing,
-                config.flowTemporalAlpha, config.flowMaxMotionPx);
+                config.flowTemporalAlpha, config.flowMaxMotionPx,
+                config.trackerContrast);                         // <<< контраст
 
         if (worker == null) {
             worker = new HandlerThread("SensorWorker");
@@ -387,8 +541,7 @@ public class SensorService extends Service {
         }
 
         if (!openCamera()) {
-            lastCameraError = "Не удалось открыть камеру. Закройте другие приложения с камерой и нажмите «Запустить».";
-            Log.e(TAG, "startSensorOnly: camera open failed");
+            lastCameraError = "Не удалось открыть камеру...";
             return;
         }
 
@@ -409,8 +562,15 @@ public class SensorService extends Service {
         lastFlashState  = "";
         skippedReadings = 0L;
 
-        Log.i(TAG, "Sensor started " + previewWidth + "x" + previewHeight
-                + ", flashlight=" + (flashlight != null && flashlight.isAvailable()));
+        synchronized (calibLock) {
+            calibSamples.clear();
+            calibActive = false;
+            calibPendingZero = false;
+            calibStatus = config.posCalibrated ? "done" : "idle";
+        }
+        forcePublish = true;
+
+        Log.i(TAG, "Sensor started ...");
         updateNotification(buildStatusLine());
     }
 
@@ -504,6 +664,29 @@ public class SensorService extends Service {
     private boolean configureCamera() {
         try {
             Camera.Parameters p = camera.getParameters();
+            if (cachedCameraSizes == null) {
+                List<Camera.Size> sizes = p.getSupportedPreviewSizes();
+                if (sizes != null) {
+                    java.util.ArrayList<Camera.Size> sorted =
+                            new java.util.ArrayList<Camera.Size>(sizes);
+                    Collections.sort(sorted, new Comparator<Camera.Size>() {
+                        @Override public int compare(Camera.Size a, Camera.Size b) {
+                            return a.width * a.height - b.width * b.height;
+                        }
+                    });
+                    org.json.JSONArray arr = new org.json.JSONArray();
+                    for (Camera.Size s : sorted) {
+                        try {
+                            JSONObject o = new JSONObject();
+                            o.put("width", s.width);
+                            o.put("height", s.height);
+                            o.put("area", s.width * s.height);
+                            arr.put(o);
+                        } catch (Exception ignored) {}
+                    }
+                    cachedCameraSizes = arr;
+                }
+            }
             Camera.Size size = pickPreviewSize(p.getSupportedPreviewSizes());
             previewWidth = size.width;
             previewHeight = size.height;
@@ -557,19 +740,40 @@ public class SensorService extends Service {
             return false;
         }
     }
-
+    public org.json.JSONArray getCameraSizes() {
+        return cachedCameraSizes != null
+                ? cachedCameraSizes : new org.json.JSONArray();
+    }
     private static void sleepMs(long ms) {
         try { Thread.sleep(ms); } catch (InterruptedException ignored) {}
     }
 
     private Camera.Size pickPreviewSize(List<Camera.Size> sizes) {
+        if (sizes == null || sizes.isEmpty()) return null;
+
+        // Явный выбор из конфига
+        if (config.cameraPreviewWidth > 0 && config.cameraPreviewHeight > 0) {
+            for (Camera.Size s : sizes) {
+                if (s.width == config.cameraPreviewWidth
+                        && s.height == config.cameraPreviewHeight) {
+                    Log.i(TAG, "Preview size (config): " + s.width + "x" + s.height);
+                    return s;
+                }
+            }
+            Log.w(TAG, "Requested " + config.cameraPreviewWidth + "x"
+                    + config.cameraPreviewHeight + " not supported; using lowest");
+        }
+
+        // Auto: самое низкое (>= 128x96)
         Camera.Size best = null;
         for (Camera.Size s : sizes) {
             if (s.width < 128 || s.height < 96) continue;
             if (best == null) { best = s; continue; }
             if (s.width * s.height < best.width * best.height) best = s;
         }
-        return best != null ? best : sizes.get(0);
+        if (best == null) best = sizes.get(0);
+        Log.i(TAG, "Preview size (auto/lowest): " + best.width + "x" + best.height);
+        return best;
     }
 
     // ==============================================================
@@ -614,16 +818,27 @@ public class SensorService extends Service {
         int w, h;
         synchronized (snapshotLock) {
             if (fullFrame == null || previewWidth <= 0 || previewHeight <= 0) return null;
-            w = previewWidth;
-            h = previewHeight;
+            w = previewWidth; h = previewHeight;
             frameCopy = new byte[fullFrame.length];
             System.arraycopy(fullFrame, 0, frameCopy, 0, fullFrame.length);
         }
 
-        // >>> grayscale: обнуляем хрому до нейтрального серого (V=U=128) <<<
+        int ySize = w * h;
+
+        // >>> grayscale: хрома в 128
         if (config.grayscaleOutput) {
-            int ySize = w * h;
             for (int i = ySize; i < frameCopy.length; i++) frameCopy[i] = (byte) 128;
+        }
+
+        // >>> контраст на Y-плоскость
+        if (config.outputContrast != 100) {
+            int c = config.outputContrast;
+            for (int i = 0; i < ySize; i++) {
+                int v = frameCopy[i] & 0xFF;
+                int v2 = 128 + ((v - 128) * c) / 100;
+                if (v2 < 0) v2 = 0; else if (v2 > 255) v2 = 255;
+                frameCopy[i] = (byte) v2;
+            }
         }
 
         int rotation = config.cameraPreviewRotation;
@@ -636,19 +851,15 @@ public class SensorService extends Service {
             java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
             yuv.compressToJpeg(new android.graphics.Rect(0, 0, w, h), quality, baos);
             byte[] jpeg0 = baos.toByteArray();
-
             if (rotation == 0) return jpeg0;
-
             android.graphics.Bitmap src = android.graphics.BitmapFactory.decodeByteArray(
                     jpeg0, 0, jpeg0.length, null);
             if (src == null) return jpeg0;
-
             android.graphics.Matrix m = new android.graphics.Matrix();
             m.postRotate(rotation);
             android.graphics.Bitmap rotated = android.graphics.Bitmap.createBitmap(
                     src, 0, 0, src.getWidth(), src.getHeight(), m, true);
             if (rotated != src) { try { src.recycle(); } catch (Exception ignored) {} }
-
             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
             rotated.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, out);
             try { rotated.recycle(); } catch (Exception ignored) {}
@@ -716,9 +927,7 @@ public class SensorService extends Service {
             seq++;
 
             // 1. Оси по настройкам монтажа
-            double dx = r.dxPx;
-            double dy = r.dyPx;
-
+            double dx = r.dxPx, dy = r.dyPx;
             int rot = ((config.cameraMountRotationDeg % 360) + 360) % 360;
             if (rot == 90)       { double t = dx; dx = -dy; dy = t; }
             else if (rot == 180) { dx = -dx; dy = -dy; }
@@ -726,18 +935,28 @@ public class SensorService extends Service {
             if (config.invertDx) dx = -dx;
             if (config.invertDy) dy = -dy;
 
-            // >>> НАКОПЛЕНИЕ ПОЗИЦИИ (только когда трекер уверен)
+            // >>> 2. ИНТЕГРИРОВАНИЕ С БИАС-КОРРЕКЦИЕЙ И DEADBAND <<<
             if (r.valid) {
-                synchronized (positionLock) {
-                    posX += dx;
-                    posY += dy;
+                // Калибровочные сэмплы — RAW dx, dy (без биаса)
+                collectCalibSample(dx, dy);
+
+                double adjDx = dx - config.posBiasX;
+                double adjDy = dy - config.posBiasY;
+                double mag   = Math.hypot(adjDx, adjDy);
+
+                if (mag >= config.posDeadbandPx) {
+                    synchronized (positionLock) {
+                        posX += adjDx;
+                        posY += adjDy;
+                    }
                 }
+                // иначе: шум покоя — не добавляем, позиция стабильна
             }
 
             double distance     = Math.hypot(dx, dy);
             double directionDeg = normalizeDeg(Math.toDegrees(Math.atan2(dy, dx)));
 
-            // 2. JSON
+            // 3. JSON
             JSONObject reading = new JSONObject();
             reading.put("seq", seq);
             reading.put("timestamp_ms", timestamp);
@@ -765,7 +984,6 @@ public class SensorService extends Service {
             shift.put("invert_dy",     config.invertDy);
             reading.put("shift", shift);
 
-            // >>> ПОЗИЦИЯ ОТ НУЛЯ
             reading.put("position", positionJson());
 
             JSONObject q = new JSONObject();
@@ -784,16 +1002,14 @@ public class SensorService extends Service {
                 f.put("lux",       flashlight.getLux());
                 reading.put("flashlight", f);
             }
-
             reading.put("proc_ms", round(r.processNs / 1e6, 2));
 
             synchronized (flowResultLock) { lastFlowResult = r; }
 
-            // 3. Решение о публикации
+            // 4. Публикация
             boolean shouldPublish;
             String  reason;
 
-            // >>> forcePublish (после tare/reset) публикует даже при !valid
             boolean forced = forcePublish;
             if (forced) forcePublish = false;
 
@@ -972,7 +1188,12 @@ public class SensorService extends Service {
             o.put("flowMaxMotionPx",       config.flowMaxMotionPx);
             o.put("grayscaleOutput",       config.grayscaleOutput);
             o.put("position", positionJson());
-
+            o.put("calib", calibStatusJson());
+            o.put("trackerContrast",     config.trackerContrast);
+            o.put("outputContrast",      config.outputContrast);
+            o.put("cameraPreviewWidth",  config.cameraPreviewWidth);
+            o.put("cameraPreviewHeight", config.cameraPreviewHeight);
+            o.put("cameraSizes",         getCameraSizes());
             boolean hasFrame;
             synchronized (snapshotLock) { hasFrame = (fullFrame != null); }
             o.put("hasFrame", hasFrame);

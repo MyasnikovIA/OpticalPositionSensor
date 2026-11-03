@@ -20,6 +20,7 @@ public class OpticalFlowTracker {
     private int maxSadPx = 18;
     private int targetWidth = 112;
     private int outlierPx   = 2;
+    private int contrast = 100;   // 100 = без изменений
 
     // --- Шумоподавление ---
     private int     minVariance        = 400;    // дисперсия блока (stddev ≈ 20)
@@ -56,7 +57,8 @@ public class OpticalFlowTracker {
     public void configure(int targetWidth, int search, int block,
                           int minVariance, int minGradient, int maxSadPx,
                           boolean subpixel, boolean temporalSmoothing,
-                          double temporalAlpha, double maxMotionPx) {
+                          double temporalAlpha, double maxMotionPx,
+                          int contrast) {
         this.targetWidth       = Math.max(32, targetWidth);
         this.search            = Math.max(1, search);
         this.block             = Math.max(4, block);
@@ -67,6 +69,7 @@ public class OpticalFlowTracker {
         this.temporalSmoothing = temporalSmoothing;
         this.temporalAlpha     = Math.max(0.05, Math.min(1.0, temporalAlpha));
         this.maxMotionPx       = Math.max(1.0, maxMotionPx);
+        this.contrast          = Math.max(50, Math.min(300, contrast));
         this.lastW = -1;
     }
 
@@ -108,6 +111,18 @@ public class OpticalFlowTracker {
             int src = yy * downscale * width;
             int dst = yy * gw;
             for (int xx = 0; xx < gw; xx++) cur[dst + xx] = yPlane[src + xx * downscale];
+        }
+
+        // >>> КОНТРАСТ к рабочему буферу
+        if (contrast != 100) {
+            int c = contrast;
+            int len = gw * gh;
+            for (int i = 0; i < len; i++) {
+                int v = cur[i] & 0xFF;
+                int v2 = 128 + ((v - 128) * c) / 100;
+                if (v2 < 0) v2 = 0; else if (v2 > 255) v2 = 255;
+                cur[i] = (byte) v2;
+            }
         }
 
         if (!hasPrev) {

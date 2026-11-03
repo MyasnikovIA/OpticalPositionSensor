@@ -26,6 +26,7 @@
          cursor:pointer;font-family:monospace;font-size:13px;margin:8px 6px 0 0}
   button:active{background:#369}
   button.green{background:#285}
+  button.orange{background:#a63}
   button.red{background:#833}
   .row{display:flex;gap:8px;flex-wrap:wrap}
   .row > div{flex:1;min-width:120px}
@@ -35,6 +36,8 @@
   .hint a{color:#6cf}
   .warn{color:#fca;font-size:12px;margin-top:6px;background:#221408;
         padding:6px 8px;border-radius:4px;border-left:3px solid #fa4}
+  .status{background:#0e1418;border-radius:6px;padding:8px;font-size:12px;color:#8aa;
+          margin-top:6px}
 </style>
 </head>
 <body>
@@ -121,9 +124,39 @@
             <option value="180">180° (вверх ногами)</option>
             <option value="270">270° (90° влево)</option>
         </select>
+
+        <h3 style="font-size:12px;color:#adf;margin:16px 0 6px">Разрешение камеры</h3>
+        <div class="row">
+            <div style="flex:2">
+                <label>Разрешение превью</label>
+                <select id="cameraPreviewSize">
+                    <option value="0x0">Авто (самое низкое)</option>
+                </select>
+            </div>
+            <div style="flex:1">
+                <label>&nbsp;</label>
+                <button onclick="loadCameraSizes()">Обновить список</button>
+            </div>
+        </div>
         <div class="hint">
-            Применяется на сервере до отправки клиенту. Влияет на
-            <code>/api/sensor/stream.mjpg</code> и <code>/api/sensor/snapshot.jpg</code>.
+            «Авто» = самое низкое поддерживаемое разрешение (≥ 128×96) — минимальная нагрузка на CPU.
+            Изменение применяется при следующем запуске камеры (Стоп → Старт).
+        </div>
+
+        <h3 style="font-size:12px;color:#adf;margin:16px 0 6px">Контраст</h3>
+        <div class="row">
+            <div>
+                <label>Контраст для optical flow, % (50–300)</label>
+                <input id="trackerContrast" type="number" min="50" max="300" step="5">
+            </div>
+            <div>
+                <label>Контраст для JPEG-вывода, % (50–300)</label>
+                <input id="outputContrast" type="number" min="50" max="300" step="5">
+            </div>
+        </div>
+        <div class="hint">
+            100 = без изменений. 150–200 помогает в сумерках / на низкоконтрастных поверхностях.
+            Для отладки трекера: <a href="/api/sensor/debug.jpg" target="_blank">/api/sensor/debug.jpg</a>.
         </div>
     </div>
 
@@ -144,12 +177,7 @@
         <label class="inline"><input type="checkbox" id="invertDy"> Инвертировать Y</label>
         <div class="hint">
             Применяется к dx_px, dy_px, distance_px, direction_deg в JSON.
-            Не влияет на картинку (для неё — параметр «Поворот картинки с камеры»).
-        </div>
-        <div class="hint" style="margin-top:8px;color:#adf">
-            ⓘ Установка нуля отсчёта и сброс накопленной позиции —
-            на странице <a href="sensor.html" style="color:#6cf">Live</a>
-            (кнопки «Установить ноль здесь» / «Сбросить накопление»).
+            Ноль ставится на странице <a href="sensor.html">Live</a>.
         </div>
     </div>
 
@@ -166,10 +194,33 @@
         <label>Heartbeat, мс (0 = выключить)</label>
         <input id="publishHeartbeatMs" type="number" min="0" max="600000">
         <div class="hint">
-            Изменения меньше указанных порогов считаются «шумом» и не публикуются.
-            Изменение фонарика, первый кадр и ручной tare публикуются всегда.
-            Heartbeat раз в N мс гарантирует, что клиент знает: связь жива.
+            Изменения меньше порогов — «шум», не публикуются.
+            Первый кадр, изменение фонарика, ручной tare — публикуются всегда.
         </div>
+    </div>
+
+    <div class="card">
+        <h2>Стабилизация нуля (калибровка покоя)</h2>
+        <div class="row">
+            <div><label>posBiasX (вычитается из dx)</label>
+                <input id="posBiasX" type="number" step="0.001" min="-10" max="10"></div>
+            <div><label>posBiasY (вычитается из dy)</label>
+                <input id="posBiasY" type="number" step="0.001" min="-10" max="10"></div>
+        </div>
+        <label>posDeadbandPx — порог «шум/движение» (0.05–2.0 px/кадр)</label>
+        <input id="posDeadbandPx" type="number" step="0.01" min="0" max="10">
+        <label class="inline"><input type="checkbox" id="posCalibrated">
+            Калибровка применена</label>
+        <div class="hint">
+            Обычно эти поля заполняются автоматически кнопкой
+            <b>«⏱ Калибровать покой + ноль»</b> на странице <a href="sensor.html">Live</a>.
+            Ручная правка нужна только для тонкой подстройки.<br>
+            <b>Если позиция уплывает</b> — уменьшите posDeadbandPx (например, до 0.10)
+            или повторите калибровку. <b>Если медленное движение не улавливается</b> —
+            тоже уменьшите posDeadbandPx.
+        </div>
+        <div class="status" id="calibNow">—</div>
+        <button class="orange" onclick="calibFromConfig()">⏱ Перезапустить калибровку (2 сек)</button>
     </div>
 
     <div class="card">
@@ -183,7 +234,7 @@
             <div><label>maxSadPx (порог SAD на пиксель)</label>
                 <input id="maxSadPx" type="number" min="1" max="255"></div>
         </div>
-        <div class="hint">Изменение этих параметров применяется при следующем запуске камеры (Стоп → Старт).</div>
+        <div class="hint">Изменение параметров применяется при следующем запуске камеры (Стоп → Старт).</div>
     </div>
 
     <div class="card">
@@ -209,9 +260,7 @@
         <div class="hint">
             <b>Как тюнить:</b> ложные срабатывания в статике → ↑ flowMinVariance / ↑ flowMinGradient;
             дрожание ±0.3px → ↓ flowTemporalAlpha до 0.4–0.5;
-            «плывёт» на быстрых движениях → ↑ flowTemporalAlpha до 0.8, ↑ searchRadius.<br>
-            Диагностика: <a href="/api/sensor/debug.jpg" target="_blank">/api/sensor/debug.jpg</a>
-            — grayscale-картинка (up ×4) с красными крестами на отобранных блоках.
+            «плывёт» на быстрых движениях → ↑ flowTemporalAlpha до 0.8, ↑ searchRadius.
         </div>
     </div>
 
@@ -237,14 +286,61 @@
   var $ = function(id){ return document.getElementById(id); };
   function basicAuth() { return 'Basic ' + btoa($('user').value + ':' + $('pass').value); }
 
+  var cameraSizesLoaded = false;
+
+  function populateCameraSizes(sizes, cfgW, cfgH) {
+    var sel = $('cameraPreviewSize');
+    sel.innerHTML = '<option value="0x0">Авто (самое низкое)</option>';
+    if (sizes && sizes.length) {
+      for (var i = 0; i < sizes.length; i++) {
+        var s = sizes[i];
+        var v = s.width + 'x' + s.height;
+        var opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v + ' (' + s.area + ' px)';
+        if (s.width === cfgW && s.height === cfgH) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    }
+    if (cfgW && cfgH) {
+      var target = cfgW + 'x' + cfgH;
+      var found = false;
+      for (var j = 0; j < sel.options.length; j++) {
+        if (sel.options[j].value === target) { found = true; break; }
+      }
+      if (!found) {
+        var o = document.createElement('option');
+        o.value = target;
+        o.textContent = target + ' (нет в списке)';
+        o.selected = true;
+        sel.appendChild(o);
+      }
+    }
+  }
+
+  function loadCameraSizes() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/sensor/status', true);
+    xhr.onload = function() {
+      if (xhr.status !== 200) return;
+      try {
+        var st = JSON.parse(xhr.responseText);
+        populateCameraSizes(st.cameraSizes || [], st.cameraPreviewWidth, st.cameraPreviewHeight);
+        cameraSizesLoaded = true;
+      } catch (e) {}
+    };
+    xhr.send();
+  }
+
   function applyForm(c) {
     ['enabled', 'autoStart', 'restEnabled', 'sseEnabled', 'wsEnabled',
      'telnetEnabled', 'clientEnabled', 'cameraPreviewEnabled',
      'publishOnlyOnChange', 'invertDx', 'invertDy',
-     'flowSubpixel', 'flowTemporalSmoothing', 'grayscaleOutput']
+     'flowSubpixel', 'flowTemporalSmoothing', 'grayscaleOutput', 'posCalibrated']
       .forEach(function(k) {
         if (k in c) { var el = $(k); if (el) el.checked = !!c[k]; }
       });
+
     ['httpPort', 'wsPort', 'telnetPort',
      'clientProtocol', 'clientServerUrl', 'clientPath', 'clientToken',
      'clientIntervalMs', 'flashlightMode', 'lightThreshold',
@@ -252,13 +348,26 @@
      'cameraMountRotationDeg', 'publishMotionThresholdPx',
      'publishRotationThresholdDeg', 'publishHeartbeatMs',
      'targetWidth', 'searchRadius', 'blockSize', 'maxSadPx',
-     'flowMinVariance', 'flowMinGradient', 'flowTemporalAlpha', 'flowMaxMotionPx']
+     'flowMinVariance', 'flowMinGradient', 'flowTemporalAlpha', 'flowMaxMotionPx',
+     'posBiasX', 'posBiasY', 'posDeadbandPx',
+     'trackerContrast', 'outputContrast']
       .forEach(function(k) {
         if (k in c) { var el = $(k); if (el) el.value = c[k]; }
       });
+
+    // Разрешение
+    var w = (c.cameraPreviewWidth || 0);
+    var h = (c.cameraPreviewHeight || 0);
+    populateCameraSizes([], w, h);
+    if (!cameraSizesLoaded) loadCameraSizes();
   }
 
   function readForm() {
+    var sizeSel = $('cameraPreviewSize').value || '0x0';
+    var sz = sizeSel.split('x');
+    var camW = parseInt(sz[0], 10) || 0;
+    var camH = parseInt(sz[1], 10) || 0;
+
     var payload = {
       enabled: $('enabled').checked, autoStart: $('autoStart').checked,
       restEnabled: $('restEnabled').checked, sseEnabled: $('sseEnabled').checked,
@@ -275,6 +384,8 @@
       cameraPreviewFps: parseInt($('cameraPreviewFps').value,10)||5,
       cameraPreviewQuality: parseInt($('cameraPreviewQuality').value,10)||50,
       cameraPreviewRotation: parseInt($('cameraPreviewRotation').value,10)||0,
+      cameraPreviewWidth: camW,
+      cameraPreviewHeight: camH,
       cameraMountRotationDeg: parseInt($('cameraMountRotationDeg').value,10)||0,
       invertDx: $('invertDx').checked, invertDy: $('invertDy').checked,
       publishOnlyOnChange: $('publishOnlyOnChange').checked,
@@ -291,10 +402,17 @@
       flowTemporalSmoothing: $('flowTemporalSmoothing').checked,
       flowTemporalAlpha: parseFloat($('flowTemporalAlpha').value)||0.6,
       flowMaxMotionPx: parseFloat($('flowMaxMotionPx').value)||40.0,
-      grayscaleOutput: $('grayscaleOutput').checked
+      grayscaleOutput: $('grayscaleOutput').checked,
+      posBiasX: parseFloat($('posBiasX').value)||0,
+      posBiasY: parseFloat($('posBiasY').value)||0,
+      posDeadbandPx: parseFloat($('posDeadbandPx').value)||0,
+      posCalibrated: $('posCalibrated').checked,
+      trackerContrast: parseInt($('trackerContrast').value,10)||100,
+      outputContrast: parseInt($('outputContrast').value,10)||100
     };
     if (isNaN(payload.flowMinVariance)) payload.flowMinVariance = 400;
     if (isNaN(payload.flowMinGradient)) payload.flowMinGradient = 120;
+
     var httpPort = parseInt($('httpPort').value, 10);
     if (httpPort > 0) payload.httpPort = httpPort;
     return payload;
@@ -319,6 +437,12 @@
                   : '');
         }
         $('out').textContent = JSON.stringify(j.config, null, 2);
+        var c = j.config;
+        $('calibNow').innerHTML =
+            'bias X = ' + (c.posBiasX||0).toFixed(3)
+            + ', bias Y = ' + (c.posBiasY||0).toFixed(3)
+            + ', deadband = ' + (c.posDeadbandPx||0).toFixed(3) + ' px '
+            + (c.posCalibrated ? ' ✓' : ' —');
       } catch (e) {
         $('out').textContent = 'Ошибка разбора JSON: ' + e.message;
       }
@@ -344,13 +468,7 @@
       try {
         var j = JSON.parse(xhr.responseText);
         applyForm(j.config);
-        var txt = 'Сохранено.\n\n' + JSON.stringify(j.config, null, 2);
-        if (typeof j.httpPortActive === 'number' && j.config.httpPort !== j.httpPortActive) {
-          txt += '\n\n⚠ HTTP-порт в конфиге (' + j.config.httpPort
-              + ') отличается от работающего (' + j.httpPortActive
-              + '). Нажмите «Применить HTTP-порт и перезапустить».';
-        }
-        $('out').textContent = txt;
+        $('out').textContent = 'Сохранено.\n\n' + JSON.stringify(j.config, null, 2);
         $('newUser').value = ''; $('newPass').value = '';
         if (nu) $('user').value = nu;
         if (np) $('pass').value = np;
@@ -363,6 +481,37 @@
     xhr.send(JSON.stringify(payload));
   }
 
+  function calibFromConfig() {
+    if (!confirm('Запустить калибровку покоя? Не двигайте устройство 2 секунды.')) return;
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/calib/start', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onload = function() {
+      $('out').textContent = 'Калибровка запущена. Ожидайте 2 сек…';
+      var timer = setInterval(function() {
+        var g = new XMLHttpRequest();
+        g.open('GET', '/api/sensor/calib/status', true);
+        g.onload = function() {
+          try {
+            var j = JSON.parse(g.responseText);
+            if (j && j.calib && j.calib.status === 'done') {
+              clearInterval(timer);
+              $('out').textContent = 'Калибровка завершена. Загружаю конфиг…';
+              loadCfg();
+            } else if (j && j.calib
+                    && (j.calib.status === 'aborted_motion'
+                        || j.calib.status === 'error_too_few')) {
+              clearInterval(timer);
+              $('out').textContent = 'Калибровка не удалась: ' + j.calib.status;
+            }
+          } catch (e) {}
+        };
+        g.send();
+      }, 300);
+    };
+    xhr.send('{}');
+  }
+
   function restartSensor() {
     var x1 = new XMLHttpRequest();
     x1.open('POST', '/api/sensor/stop', true);
@@ -372,11 +521,9 @@
         var x2 = new XMLHttpRequest();
         x2.open('POST', '/api/sensor/start', true);
         x2.onload = function() { $('out').textContent = 'Камера перезапущена.'; };
-        x2.onerror = function() { $('out').textContent = 'Ошибка сети при запуске'; };
         x2.send();
       }, 400);
     };
-    x1.onerror = function() { $('out').textContent = 'Ошибка сети при остановке'; };
     x1.send();
   }
 
@@ -409,36 +556,27 @@
       x2.setRequestHeader('Authorization', basicAuth());
       x2.setRequestHeader('Content-Type', 'application/json');
       x2.onload = function() {
-        if (x2.status !== 200) {
-          $('portWarn').style.display = '';
-          $('portWarn').textContent = 'Ошибка перезапуска: HTTP ' + x2.status;
-          return;
-        }
         $('portWarn').style.display = '';
         $('portWarn').className = 'hint';
         $('portWarn').textContent =
-            'Перезапуск… Переход на http://' + location.hostname + ':'
-            + newPort + '/config.html через 2.5 сек.';
+            'Перезапуск… Переход на порт ' + newPort + ' через 2.5 сек.';
         setTimeout(function() {
           location.href = location.protocol + '//' + location.hostname + ':'
                        + newPort + '/config.html';
         }, 2500);
       };
-      x2.onerror = function() {
-        $('portWarn').style.display = '';
-        $('portWarn').textContent = 'Ошибка сети при перезапуске';
-      };
       x2.send(JSON.stringify({port: newPort}));
-    };
-    x1.onerror = function() {
-      $('portWarn').style.display = '';
-      $('portWarn').textContent = 'Ошибка сети при сохранении';
     };
     x1.send(JSON.stringify(savePayload));
   }
 
-  window.loadCfg = loadCfg; window.saveCfg = saveCfg;
-  window.restartSensor = restartSensor; window.applyHttpPort = applyHttpPort;
+  window.loadCfg = loadCfg;
+  window.saveCfg = saveCfg;
+  window.restartSensor = restartSensor;
+  window.applyHttpPort = applyHttpPort;
+  window.loadCameraSizes = loadCameraSizes;
+  window.calibFromConfig = calibFromConfig;
+
   loadCfg();
 })();
 </script>

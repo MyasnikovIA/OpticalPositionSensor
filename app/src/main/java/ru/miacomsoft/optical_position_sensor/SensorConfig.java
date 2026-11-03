@@ -37,6 +37,21 @@ public class SensorConfig {
     public int     minContrast        = 3;
     public int     maxSadPx           = 18;
 
+
+    // ---- Обнуление + калибровка покоя ----
+    public double  posBiasX          = 0.0;      // систематическое смещение по X (вычитается)
+    public double  posBiasY          = 0.0;
+    public double  posDeadbandPx     = 0.15;     // deadband при интегрировании (px на кадр)
+    public boolean posCalibrated     = false;    // калибровка применена
+
+    // ---- Контраст (100 = без изменений) ----
+    public int     trackerContrast   = 100;      // для входа OpticalFlowTracker
+    public int     outputContrast    = 100;      // для grayscale JPEG
+
+    // ---- Разрешение камеры (0,0 = auto = самое низкое) ----
+    public int     cameraPreviewWidth  = 0;
+    public int     cameraPreviewHeight = 0;
+
     public String  flashlightMode     = "off";       // off|on|auto
     public int     lightThreshold     = 50;
 
@@ -93,6 +108,14 @@ public class SensorConfig {
         c.lightThreshold    = lightThreshold;
         c.configUser        = configUser;
         c.configPass        = configPass;
+        c.posBiasX            = posBiasX;
+        c.posBiasY            = posBiasY;
+        c.posDeadbandPx       = posDeadbandPx;
+        c.posCalibrated       = posCalibrated;
+        c.trackerContrast     = trackerContrast;
+        c.outputContrast      = outputContrast;
+        c.cameraPreviewWidth  = cameraPreviewWidth;
+        c.cameraPreviewHeight = cameraPreviewHeight;
         return c;
     }
 
@@ -145,6 +168,14 @@ public class SensorConfig {
         c.flowTemporalAlpha     = s.optDouble ("flowTemporalAlpha",     c.flowTemporalAlpha);
         c.flowMaxMotionPx       = s.optDouble ("flowMaxMotionPx",       c.flowMaxMotionPx);
         c.grayscaleOutput       = s.optBoolean("grayscaleOutput",       c.grayscaleOutput);
+        c.posBiasX            = s.optDouble ("posBiasX",            c.posBiasX);
+        c.posBiasY            = s.optDouble ("posBiasY",            c.posBiasY);
+        c.posDeadbandPx       = s.optDouble ("posDeadbandPx",       c.posDeadbandPx);
+        c.posCalibrated       = s.optBoolean("posCalibrated",       c.posCalibrated);
+        c.trackerContrast     = s.optInt    ("trackerContrast",     c.trackerContrast);
+        c.outputContrast      = s.optInt    ("outputContrast",      c.outputContrast);
+        c.cameraPreviewWidth  = s.optInt    ("cameraPreviewWidth",  c.cameraPreviewWidth);
+        c.cameraPreviewHeight = s.optInt    ("cameraPreviewHeight", c.cameraPreviewHeight);
         return c;
     }
 
@@ -198,6 +229,14 @@ public class SensorConfig {
         s.put("flowTemporalAlpha",     flowTemporalAlpha);
         s.put("flowMaxMotionPx",       flowMaxMotionPx);
         s.put("grayscaleOutput",       grayscaleOutput);
+        s.put("posBiasX",            posBiasX);
+        s.put("posBiasY",            posBiasY);
+        s.put("posDeadbandPx",       posDeadbandPx);
+        s.put("posCalibrated",       posCalibrated);
+        s.put("trackerContrast",     trackerContrast);
+        s.put("outputContrast",      outputContrast);
+        s.put("cameraPreviewWidth",  cameraPreviewWidth);
+        s.put("cameraPreviewHeight", cameraPreviewHeight);
         root.put("sensor", s);
         return root;
     }
@@ -257,6 +296,23 @@ public class SensorConfig {
         flowTemporalAlpha     = p.optDouble ("flowTemporalAlpha",     flowTemporalAlpha);
         flowMaxMotionPx       = p.optDouble ("flowMaxMotionPx",       flowMaxMotionPx);
         grayscaleOutput       = p.optBoolean("grayscaleOutput",       grayscaleOutput);
+
+        posBiasX            = p.optDouble ("posBiasX",            posBiasX);
+        posBiasY            = p.optDouble ("posBiasY",            posBiasY);
+        posDeadbandPx       = p.optDouble ("posDeadbandPx",       posDeadbandPx);
+        posCalibrated       = p.optBoolean("posCalibrated",       posCalibrated);
+        trackerContrast     = p.optInt    ("trackerContrast",     trackerContrast);
+        outputContrast      = p.optInt    ("outputContrast",      outputContrast);
+        cameraPreviewWidth  = p.optInt    ("cameraPreviewWidth",  cameraPreviewWidth);
+        cameraPreviewHeight = p.optInt    ("cameraPreviewHeight", cameraPreviewHeight);
+
+// Clamp
+        if (posDeadbandPx < 0)     posDeadbandPx = 0;
+        if (posDeadbandPx > 10)    posDeadbandPx = 10;
+        if (trackerContrast < 50)  trackerContrast = 50;
+        if (trackerContrast > 300) trackerContrast = 300;
+        if (outputContrast < 50)   outputContrast = 50;
+        if (outputContrast > 300)  outputContrast = 300;
 
         String u    = p.optString("configUser", "");
         String pass = p.optString("configPass", "");
