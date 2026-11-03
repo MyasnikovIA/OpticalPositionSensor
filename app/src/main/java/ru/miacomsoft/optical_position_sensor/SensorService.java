@@ -266,7 +266,6 @@ public class SensorService extends Service {
         }
     }
 
-    /** Для RestHandler: публичный доступ. */
     public JSONObject positionJsonPublic() { return positionJson(); }
 // ==============================================================
 // Калибровка покоя (static-point calibration)
@@ -606,7 +605,6 @@ public class SensorService extends Service {
     public JSONObject mapJson() {
         try {
             JSONObject o = new JSONObject();
-
             double rx, ry, zeroXc, zeroYc;
             long   t0;
             synchronized (positionLock) {
@@ -617,8 +615,8 @@ public class SensorService extends Service {
                 t0 = zeroSetAtMs;
             }
 
-            o.put("x_px",              round(rx, 3));
-            o.put("y_px",              round(ry, 3));
+            o.put("x_px",              round(rx, 3));   // + = вправо
+            o.put("y_px",              round(ry, 3));   // + = вперёд
             o.put("rotation_deg",      round(normalizeDeg(totalRotationDeg), 2));
             o.put("zero_set_at_ms",    t0);
             o.put("calibrated",        config.posCalibrated);
@@ -630,8 +628,8 @@ public class SensorService extends Service {
             synchronized (trailLock) {
                 for (double[] pt : trail) {
                     JSONObject p = new JSONObject();
-                    p.put("x",   round(pt[0] - zeroXc, 2));
-                    p.put("y",   round(pt[1] - zeroYc, 2));
+                    p.put("x",   round(pt[0] - zeroXc, 2));   // + = вправо
+                    p.put("y",   round(pt[1] - zeroYc, 2));   // + = вперёд
                     p.put("rot", round(normalizeDeg(pt[2]), 2));
                     p.put("t",   (long) pt[3]);
                     arr.put(p);
@@ -1000,6 +998,7 @@ public class SensorService extends Service {
             OpticalFlowTracker.Result r = tracker.update(yPlane, previewWidth, previewHeight);
             seq++;
 
+            // ---- 1. Оси по настройкам монтажа ----
             double dx = r.dxPx, dy = r.dyPx;
             int rot = ((config.cameraMountRotationDeg % 360) + 360) % 360;
             if (rot == 90)       { double t = dx; dx = -dy; dy = t; }
@@ -1008,29 +1007,46 @@ public class SensorService extends Service {
             if (config.invertDx) dx = -dx;
             if (config.invertDy) dy = -dy;
 
-            // ---- накопление позиции + поворота + трейл
+            // ---- 2. Накопление позиции + поворота ----
             if (r.valid) {
                 collectCalibSample(dx, dy);
 
-                // deadband от шума покоя
+                // deadband и bias — в системе трекера (dx, dy), ДО пересчёта осей
                 double adjDx = dx - config.posBiasX;
                 double adjDy = dy - config.posBiasY;
                 double mag   = Math.hypot(adjDx, adjDy);
+
                 if (mag >= config.posDeadbandPx) {
+                    // >>> ПЕРЕСЧЁТ В «ЧЕЛОВЕЧЕСКИЕ» ОСИ СЕРВЕРА <<<
+                    //
+                    // До правки (дефолт invertDx=false, invertDy=true, rot=0):
+                    //   вперёд → adjDx < 0   (adjDx = «назад+»)
+                    //   назад  → adjDx > 0
+                    //   вправо → adjDy > 0   (adjDy = «вправо+»)
+                    //   влево  → adjDy < 0
+                    //
+                    // Хотим на сервере:
+                    //   posX+ = вправо
+                    //   posY+ = вперёд
+                    //
+                    // Значит:
+                    //   posX += +adjDy   (вправо → +X)
+                    //   posY += −adjDx   (вперёд → +Y)
                     synchronized (positionLock) {
-                        posX += adjDx;
-                        posY += adjDy;
+                        posX += adjDy;
+                        posY += -adjDx;
                     }
                 }
 
-                // накопление поворота (с собственным deadband)
-                if (Math.abs(r.rotationDeg) > config.rotDeadbandDeg) {
-                    // инверсия осей меняет знак поворота
+                // Накопление поворота (не зависит от имён posX/posY)
+                if (r.confidence >= 0.15
+                        && r.blocksUsed >= Math.max(8, r.blocksTotal / 6)
+                        && Math.abs(r.rotationDeg) > config.rotDeadbandDeg) {
                     double rotSign = (config.invertDx ^ config.invertDy) ? -1.0 : 1.0;
                     totalRotationDeg += rotSign * r.rotationDeg;
                 }
 
-                // трейл
+                // Трейл — использует уже переименованные posX/posY
                 synchronized (trailLock) {
                     double dxT = posX - lastTrailX;
                     double dyT = posY - lastTrailY;
@@ -1043,9 +1059,11 @@ public class SensorService extends Service {
                 }
             }
 
+            // Для shift.* оставляем dx/dy в системе трекера (это «дельты за кадр»)
             double distance     = Math.hypot(dx, dy);
             double directionDeg = normalizeDeg(Math.toDegrees(Math.atan2(dy, dx)));
 
+            // ---- 4. JSON ----
             JSONObject reading = new JSONObject();
             reading.put("seq", seq);
             reading.put("timestamp_ms", timestamp);
@@ -1062,16 +1080,16 @@ public class SensorService extends Service {
             reading.put("frame", frame);
 
             JSONObject shift = new JSONObject();
-            shift.put("valid",         r.valid);
-            shift.put("dx_px",         round(dx, 3));
-            shift.put("dy_px",         round(dy, 3));
-            shift.put("distance_px",   round(distance, 3));
-            shift.put("direction_deg", round(directionDeg, 2));
-            shift.put("rotation_deg",  round(r.rotationDeg, 3));
-            shift.put("total_rotation_deg", round(normalizeDeg(totalRotationDeg), 2));
-            shift.put("mount_rotation_deg", rot);
-            shift.put("invert_dx",     config.invertDx);
-            shift.put("invert_dy",     config.invertDy);
+            shift.put("valid",               r.valid);
+            shift.put("dx_px",               round(dx, 3));
+            shift.put("dy_px",               round(dy, 3));
+            shift.put("distance_px",         round(distance, 3));
+            shift.put("direction_deg",       round(directionDeg, 2));
+            shift.put("rotation_deg",        round(r.rotationDeg, 3));
+            shift.put("total_rotation_deg",  round(normalizeDeg(totalRotationDeg), 2));
+            shift.put("mount_rotation_deg",  rot);
+            shift.put("invert_dx",           config.invertDx);
+            shift.put("invert_dy",           config.invertDy);
             reading.put("shift", shift);
 
             reading.put("position", positionJson());
@@ -1096,8 +1114,10 @@ public class SensorService extends Service {
 
             synchronized (flowResultLock) { lastFlowResult = r; }
 
+            // ---- 5. Публикация ----
             boolean shouldPublish;
             String  reason;
+
             boolean forced = forcePublish;
             if (forced) forcePublish = false;
 

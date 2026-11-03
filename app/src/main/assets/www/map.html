@@ -150,12 +150,12 @@
   //   mapX = -posX
   //   mapY = -posY
   // ============================================================
-  function serverToMap(posX, posY) {
-    return { x: -posX, y: -posY };
-  }
-  function trailPointToMap(tp) {
-    return { x: -tp.x, y: -tp.y, rot: tp.rot || 0, t: tp.t };
-  }
+    function serverToMap(posX, posY) {
+        return { x: posX, y: posY };
+    }
+    function trailPointToMap(tp) {
+        return { x: tp.x, y: tp.y, rot: tp.rot || 0, t: tp.t };
+    }
 
   // ============================================================
   // World → Screen (с флипом Y — «вверх» на экране = «вверх» в мире)
