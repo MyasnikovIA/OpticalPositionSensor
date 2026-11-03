@@ -192,8 +192,21 @@ public class HttpServer {
         synchronized (contexts) {
             for (HttpContext c : contexts) {
                 String prefix = c.getPath();
-                if ("/".equals(prefix)) return c.getHandler();
-                if (path.equals(prefix) || path.startsWith(prefix + "/")) {
+                if ("/".equals(prefix)) {
+                    // "/" — fallback, всегда последний в отсортированном contexts
+                    return c.getHandler();
+                }
+
+                // Нормализация: убираем завершающий "/" у префикса (кроме корня)
+                String p = (prefix.length() > 1 && prefix.endsWith("/"))
+                        ? prefix.substring(0, prefix.length() - 1)
+                        : prefix;
+
+                // Матч по точному пути, по префиксу с оригинальным слэшем,
+                // и по префиксу без завершающего слэша + "/"
+                if (path.equals(prefix)                       // /api/sensor/sse
+                        || path.equals(p)                     // /api/sensor
+                        || path.startsWith(p + "/")) {        // /api/sensor/map
                     return c.getHandler();
                 }
             }

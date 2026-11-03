@@ -8,10 +8,6 @@ import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.util.concurrent.Executors;
 
-/**
- * Собирает REST + SSE + статику в одном HttpServer
- * (из com.sun.net.httpserver, уже скопированного в проект).
- */
 public class HttpApiServer {
 
     private static final String TAG = "HttpApiServer";
@@ -30,15 +26,19 @@ public class HttpApiServer {
 
         server = HttpServer.create(new InetSocketAddress(host, port), 0);
 
+        // --- Специфичные контексты (совпадают по точному пути) ---
         server.createContext("/api/sensor/sse",          new SseHandler(svc.getBroadcaster()));
         server.createContext("/api/sensor/snapshot.jpg", new SnapshotHandler(svc.getSnapshotProvider()));
         server.createContext("/api/sensor/stream.mjpg",  new SnapshotHandler(svc.getSnapshotProvider()));
+        server.createContext("/api/sensor/debug.jpg",    new SnapshotHandler(svc.getSnapshotProvider()));
+
+        // --- Префиксный: ловит всё остальное под /api/sensor/ ---
         server.createContext("/api/sensor/",             new RestHandler(svc));
+
+        // --- Статика (assets/www/) ---
         server.createContext("/",                        new StaticHandler(context));
-        server.createContext("/api/sensor/snapshot.jpg", new SnapshotHandler(svc.getSnapshotProvider()));
-        server.createContext("/api/sensor/stream.mjpg",  new SnapshotHandler(svc.getSnapshotProvider()));
-        server.createContext("/api/sensor/debug.jpg", new SnapshotHandler(svc.getSnapshotProvider()));
-        server.setExecutor(Executors.newFixedThreadPool(8));   // было 6
+
+        server.setExecutor(Executors.newFixedThreadPool(8));
         server.start();
         Log.i(TAG, "Listening on " + host + ":" + port);
     }

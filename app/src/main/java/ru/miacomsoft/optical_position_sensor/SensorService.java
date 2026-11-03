@@ -40,6 +40,16 @@ public class SensorService extends Service {
     public static final String ACTION_START = "ru.miacomsoft.optical_position_sensor.START";
     public static final String ACTION_STOP  = "ru.miacomsoft.optical_position_sensor.STOP";
 
+    // ---- Накопленный поворот прибора (для отображения «куда смотрит») ----
+    private volatile double totalRotationDeg = 0.0;
+
+    // ---- Трейл (след движения по полю) ----
+    private final Object trailLock = new Object();
+    private final List<double[]> trail = new ArrayList<double[]>(); // {x_abs, y_abs, rotDeg, t_ms}
+    private static final int    MAX_TRAIL_POINTS = 1000;
+    private static final double TRAIL_MIN_DIST   = 1.0;              // px между точками
+    private double lastTrailX = 0.0, lastTrailY = 0.0;
+
     // ---------- HTTP port change notification ----------
     public interface HttpPortListener {
         void onHttpPortChanged(int requestedPort, int actualPort);
@@ -202,6 +212,8 @@ public class SensorService extends Service {
             zeroY = posY;
             zeroSetAtMs = System.currentTimeMillis();
         }
+        // Трейл и totalRotationDeg намеренно НЕ сбрасываются:
+        // setZero лишь сдвигает начало координат, история и ориентация сохраняются.
         forcePublish = true;
         Log.i(TAG, "Zero set at (" + zeroX + ", " + zeroY + ")");
     }
@@ -216,8 +228,14 @@ public class SensorService extends Service {
             zeroX = 0.0; zeroY = 0.0;
             zeroSetAtMs = System.currentTimeMillis();
         }
+        totalRotationDeg = 0.0;
+        synchronized (trailLock) {
+            trail.clear();
+            trail.add(new double[]{0, 0, 0, System.currentTimeMillis()});
+            lastTrailX = 0; lastTrailY = 0;
+        }
         forcePublish = true;
-        Log.i(TAG, "Position reset");
+        Log.i(TAG, "Position and rotation reset");
     }
 
     private JSONObject positionJson() {
@@ -561,6 +579,18 @@ public class SensorService extends Service {
         lastPublishMs   = 0L;
         lastFlashState  = "";
         skippedReadings = 0L;
+        synchronized (positionLock) {
+            posX = 0.0; posY = 0.0;
+            zeroX = 0.0; zeroY = 0.0;
+            zeroSetAtMs = System.currentTimeMillis();
+        }
+        totalRotationDeg = 0.0;
+        synchronized (trailLock) {
+            trail.clear();
+            trail.add(new double[]{0, 0, 0, System.currentTimeMillis()});
+            lastTrailX = 0; lastTrailY = 0;
+        }
+
 
         synchronized (calibLock) {
             calibSamples.clear();
@@ -573,6 +603,50 @@ public class SensorService extends Service {
         Log.i(TAG, "Sensor started ...");
         updateNotification(buildStatusLine());
     }
+    public JSONObject mapJson() {
+        try {
+            JSONObject o = new JSONObject();
+
+            double rx, ry, zeroXc, zeroYc;
+            long   t0;
+            synchronized (positionLock) {
+                rx = posX - zeroX;
+                ry = posY - zeroY;
+                zeroXc = zeroX;
+                zeroYc = zeroY;
+                t0 = zeroSetAtMs;
+            }
+
+            o.put("x_px",              round(rx, 3));
+            o.put("y_px",              round(ry, 3));
+            o.put("rotation_deg",      round(normalizeDeg(totalRotationDeg), 2));
+            o.put("zero_set_at_ms",    t0);
+            o.put("calibrated",        config.posCalibrated);
+            o.put("deadband_px",       config.posDeadbandPx);
+            o.put("rot_deadband_deg",  config.rotDeadbandDeg);
+            o.put("sensor_running",    sensorRunning);
+
+            org.json.JSONArray arr = new org.json.JSONArray();
+            synchronized (trailLock) {
+                for (double[] pt : trail) {
+                    JSONObject p = new JSONObject();
+                    p.put("x",   round(pt[0] - zeroXc, 2));
+                    p.put("y",   round(pt[1] - zeroYc, 2));
+                    p.put("rot", round(normalizeDeg(pt[2]), 2));
+                    p.put("t",   (long) pt[3]);
+                    arr.put(p);
+                }
+                o.put("trail_count", trail.size());
+            }
+            o.put("trail", arr);
+            return o;
+        } catch (Exception e) {
+            Log.e(TAG, "mapJson", e);
+            return new JSONObject();
+        }
+    }
+
+    public JSONObject mapJsonPublic() { return mapJson(); }
 
     public synchronized void stopSensorOnly() {
         sensorRunning = false;
@@ -926,7 +1000,6 @@ public class SensorService extends Service {
             OpticalFlowTracker.Result r = tracker.update(yPlane, previewWidth, previewHeight);
             seq++;
 
-            // 1. Оси по настройкам монтажа
             double dx = r.dxPx, dy = r.dyPx;
             int rot = ((config.cameraMountRotationDeg % 360) + 360) % 360;
             if (rot == 90)       { double t = dx; dx = -dy; dy = t; }
@@ -935,28 +1008,44 @@ public class SensorService extends Service {
             if (config.invertDx) dx = -dx;
             if (config.invertDy) dy = -dy;
 
-            // >>> 2. ИНТЕГРИРОВАНИЕ С БИАС-КОРРЕКЦИЕЙ И DEADBAND <<<
+            // ---- накопление позиции + поворота + трейл
             if (r.valid) {
-                // Калибровочные сэмплы — RAW dx, dy (без биаса)
                 collectCalibSample(dx, dy);
 
+                // deadband от шума покоя
                 double adjDx = dx - config.posBiasX;
                 double adjDy = dy - config.posBiasY;
                 double mag   = Math.hypot(adjDx, adjDy);
-
                 if (mag >= config.posDeadbandPx) {
                     synchronized (positionLock) {
                         posX += adjDx;
                         posY += adjDy;
                     }
                 }
-                // иначе: шум покоя — не добавляем, позиция стабильна
+
+                // накопление поворота (с собственным deadband)
+                if (Math.abs(r.rotationDeg) > config.rotDeadbandDeg) {
+                    // инверсия осей меняет знак поворота
+                    double rotSign = (config.invertDx ^ config.invertDy) ? -1.0 : 1.0;
+                    totalRotationDeg += rotSign * r.rotationDeg;
+                }
+
+                // трейл
+                synchronized (trailLock) {
+                    double dxT = posX - lastTrailX;
+                    double dyT = posY - lastTrailY;
+                    if (trail.isEmpty() || Math.hypot(dxT, dyT) >= TRAIL_MIN_DIST) {
+                        trail.add(new double[]{posX, posY, totalRotationDeg, timestamp});
+                        lastTrailX = posX;
+                        lastTrailY = posY;
+                        while (trail.size() > MAX_TRAIL_POINTS) trail.remove(0);
+                    }
+                }
             }
 
             double distance     = Math.hypot(dx, dy);
             double directionDeg = normalizeDeg(Math.toDegrees(Math.atan2(dy, dx)));
 
-            // 3. JSON
             JSONObject reading = new JSONObject();
             reading.put("seq", seq);
             reading.put("timestamp_ms", timestamp);
@@ -979,6 +1068,7 @@ public class SensorService extends Service {
             shift.put("distance_px",   round(distance, 3));
             shift.put("direction_deg", round(directionDeg, 2));
             shift.put("rotation_deg",  round(r.rotationDeg, 3));
+            shift.put("total_rotation_deg", round(normalizeDeg(totalRotationDeg), 2));
             shift.put("mount_rotation_deg", rot);
             shift.put("invert_dx",     config.invertDx);
             shift.put("invert_dy",     config.invertDy);
@@ -1006,10 +1096,8 @@ public class SensorService extends Service {
 
             synchronized (flowResultLock) { lastFlowResult = r; }
 
-            // 4. Публикация
             boolean shouldPublish;
             String  reason;
-
             boolean forced = forcePublish;
             if (forced) forcePublish = false;
 

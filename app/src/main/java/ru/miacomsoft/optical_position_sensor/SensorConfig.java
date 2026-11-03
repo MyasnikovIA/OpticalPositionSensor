@@ -12,6 +12,7 @@ public class SensorConfig {
     public int     cameraPreviewFps        = 5;
     public int     cameraPreviewQuality    = 50;
     public int     cameraPreviewRotation   = 90;   // 0|90|180|270 (по часовой)
+    public double  rotDeadbandDeg     = 0.5;      // °/кадр — ниже этого поворот считается шумом
 
     public boolean enabled            = true;
     public boolean autoStart          = true;
@@ -116,6 +117,7 @@ public class SensorConfig {
         c.outputContrast      = outputContrast;
         c.cameraPreviewWidth  = cameraPreviewWidth;
         c.cameraPreviewHeight = cameraPreviewHeight;
+        c.rotDeadbandDeg      = rotDeadbandDeg;
         return c;
     }
 
@@ -176,6 +178,7 @@ public class SensorConfig {
         c.outputContrast      = s.optInt    ("outputContrast",      c.outputContrast);
         c.cameraPreviewWidth  = s.optInt    ("cameraPreviewWidth",  c.cameraPreviewWidth);
         c.cameraPreviewHeight = s.optInt    ("cameraPreviewHeight", c.cameraPreviewHeight);
+        c.rotDeadbandDeg      = s.optDouble ("rotDeadbandDeg",      c.rotDeadbandDeg);
         return c;
     }
 
@@ -237,6 +240,7 @@ public class SensorConfig {
         s.put("outputContrast",      outputContrast);
         s.put("cameraPreviewWidth",  cameraPreviewWidth);
         s.put("cameraPreviewHeight", cameraPreviewHeight);
+        s.put("rotDeadbandDeg",       rotDeadbandDeg);
         root.put("sensor", s);
         return root;
     }
@@ -305,7 +309,9 @@ public class SensorConfig {
         outputContrast      = p.optInt    ("outputContrast",      outputContrast);
         cameraPreviewWidth  = p.optInt    ("cameraPreviewWidth",  cameraPreviewWidth);
         cameraPreviewHeight = p.optInt    ("cameraPreviewHeight", cameraPreviewHeight);
-
+        rotDeadbandDeg = p.optDouble ("rotDeadbandDeg", rotDeadbandDeg);
+        if (rotDeadbandDeg < 0)   rotDeadbandDeg = 0;
+        if (rotDeadbandDeg > 30)  rotDeadbandDeg = 30;
 // Clamp
         if (posDeadbandPx < 0)     posDeadbandPx = 0;
         if (posDeadbandPx > 10)    posDeadbandPx = 10;

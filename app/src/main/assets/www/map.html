@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Карта — OpticalPositionSensor</title>
+    <style>
+  body{margin:0;background:#101418;color:#e6f0f4;font:14px/1.4 monospace;padding:0}
+  header{background:#182028;padding:10px 14px;display:flex;justify-content:space-between;
+         align-items:center;flex-wrap:wrap;gap:8px}
+  header h1{font-size:15px;margin:0;color:#6cf}
+  header nav a{color:#6cf;text-decoration:none;margin-left:8px;padding:4px 10px;
+               border-radius:4px;border:1px solid #234}
+  header nav a.active{background:#248;border-color:#248;color:#fff}
+  main{padding:12px}
+  .card{background:#182028;border-radius:8px;padding:12px;margin-bottom:12px}
+  .card h2{font-size:14px;margin:0 0 10px;color:#adf}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .kv{background:#0e1418;border-radius:6px;padding:8px;min-width:110px}
+  .k{color:#8aa;font-size:11px;text-transform:uppercase}
+  .v{font-size:16px;color:#6cf}
+  .v.small{font-size:13px;color:#adf}
+  button{background:#248;color:#fff;border:0;border-radius:6px;padding:8px 14px;
+         cursor:pointer;font-family:monospace;font-size:13px;margin-right:6px}
+  button:active{background:#369}
+  button.orange{background:#a63}
+  button.red{background:#833}
+  .hint{color:#8aa;font-size:11px;margin-top:6px;line-height:1.6}
+  .hint code{color:#adf;background:#0e1418;padding:1px 4px;border-radius:3px}
+  .warn{color:#fca;font-size:12px;margin-top:6px;background:#221408;
+        padding:6px 8px;border-radius:4px;border-left:3px solid #fa4}
+  #mapCanvas{width:100%;height:60vh;min-height:400px;max-height:700px;
+             background:#0b0f12;border-radius:6px;display:block;
+             touch-action:none;cursor:grab}
+  #mapCanvas:active{cursor:grabbing}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;
+            font-size:12px;color:#8aa}
+  .controls label{display:flex;align-items:center;gap:4px;color:#e6f0f4}
+  .controls input[type=range]{width:140px}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:#8aa;margin-top:8px}
+  .legend .sw{display:inline-block;width:14px;height:14px;vertical-align:-2px;
+              border-radius:2px;margin-right:4px}
+</style>
+</head>
+<body>
+<header>
+    <h1>Карта</h1>
+    <nav>
+        <a href="index.html">Информация</a>
+        <a href="sensor.html">Live</a>
+        <a href="map.html" class="active">Карта</a>
+        <a href="config.html">Настройки</a>
+    </nav>
+</header>
+<main>
+
+    <div class="card">
+        <h2>Положение прибора на поле</h2>
+
+        <div class="row" style="margin-bottom:10px">
+            <div class="kv"><div class="k">X, px</div><div class="v" id="stX">—</div></div>
+            <div class="kv"><div class="k">Y, px</div><div class="v" id="stY">—</div></div>
+            <div class="kv"><div class="k">Поворот, °</div><div class="v" id="stRot">—</div></div>
+            <div class="kv"><div class="k">deadband, px</div><div class="v small" id="stDb">—</div></div>
+            <div class="kv"><div class="k">точек следа</div><div class="v small" id="stTrail">—</div></div>
+            <div class="kv"><div class="k">калибровка</div><div class="v small" id="stCal">—</div></div>
+        </div>
+
+        <canvas id="mapCanvas" width="800" height="500"></canvas>
+
+        <div class="controls">
+            <button onclick="resetView()">⤢ Авто-масштаб</button>
+            <button onclick="centerOnDevice()">🎯 Центрировать</button>
+            <button class="orange" onclick="clearTrail()">🧹 Очистить след</button>
+            <button class="red" onclick="doResetPos()">↺ Сброс позиции и поворота</button>
+            <label>Zoom:
+                <input type="range" id="zoomSlider" min="0.2" max="15" step="0.1" value="2">
+                <span id="zoomVal">2.0×</span>
+            </label>
+            <label><input type="checkbox" id="showTrail" checked> След</label>
+            <label><input type="checkbox" id="showGrid"  checked> Сетка</label>
+        </div>
+
+        <div class="legend">
+            <span><span class="sw" style="background:#3c6"></span>прибор (вершина = «вперёд»)</span>
+            <span><span class="sw" style="background:#6cf"></span>след движения</span>
+            <span><span class="sw" style="background:#484"></span>ноль (0, 0)</span>
+        </div>
+
+        <div class="hint">
+            Колесо мыши — zoom к курсору. Перетаскивание — пан.<br>
+            Ориентация треугольника = <code>rotation_deg</code> (накопленный поворот с
+            deadband <code>rotDeadbandDeg</code>). Если треугольник «смотрит не туда» —
+            поменяйте «Инвертировать X/Y» в <a href="config.html">Настройках</a>: флаги
+            инвертируют и знак поворота.<br>
+            Позиция и след не «уплывают» в покое благодаря deadband-калибровке из
+            <a href="sensor.html">Live → «⏱ Калибровать покой + ноль»</a>.
+        </div>
+    </div>
+
+</main>
+<script>
+(function() {
+  var $ = function(id){ return document.getElementById(id); };
+  var canvas = $('mapCanvas');
+  var ctx = canvas.getContext('2d');
+
+  var view = {
+    offsetX: 0, offsetY: 0,
+    scale: 2.0,
+    autoFit: true
+  };
+
+  var mapState = null;
+  var trail = [];
+
+  // ------------------------------------------------------------
+  // Размер canvas с учётом DPR
+  // ------------------------------------------------------------
+  function resizeCanvas() {
+    var dpr = window.devicePixelRatio || 1;
+    var rect = canvas.getBoundingClientRect();
+    canvas.width  = Math.round(rect.width  * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    render();
+  }
+
+  function cssW() { return canvas.getBoundingClientRect().width;  }
+  function cssH() { return canvas.getBoundingClientRect().height; }
+
+  function worldToScreen(wx, wy) {
+    var cx = cssW() / 2;
+    var cy = cssH() / 2;
+    return {
+      x: cx + (wx - view.offsetX) * view.scale,
+      y: cy - (wy - view.offsetY) * view.scale   // flip Y → «вверх» на карте
+    };
+  }
+
+  function screenToWorld(sx, sy) {
+    var cx = cssW() / 2;
+    var cy = cssH() / 2;
+    return {
+      x: view.offsetX + (sx - cx) / view.scale,
+      y: view.offsetY - (sy - cy) / view.scale
+    };
+  }
+
+  // ------------------------------------------------------------
+  // Авто-fit
+  // ------------------------------------------------------------
+  function autoFitBounds() {
+    if (!mapState) return;
+    var pts = [{x:0, y:0}, {x: mapState.x_px||0, y: mapState.y_px||0}];
+    var tail = trail.slice(-300);
+    for (var i = 0; i < tail.length; i++) pts.push(tail[i]);
+
+    var minX=0, maxX=0, minY=0, maxY=0;
+    for (var i = 0; i < pts.length; i++) {
+      if (pts[i].x < minX) minX = pts[i].x;
+      if (pts[i].x > maxX) maxX = pts[i].x;
+      if (pts[i].y < minY) minY = pts[i].y;
+      if (pts[i].y > maxY) maxY = pts[i].y;
+    }
+    var dx = Math.max(50, maxX - minX + 40);
+    var dy = Math.max(50, maxY - minY + 40);
+    var sx = cssW() / dx;
+    var sy = cssH() / dy;
+    var s  = Math.min(sx, sy);
+    view.offsetX = (minX + maxX) / 2;
+    view.offsetY = (minY + maxY) / 2;
+    view.scale   = Math.max(0.2, Math.min(15, s));
+    $('zoomSlider').value = view.scale;
+    $('zoomVal').textContent = view.scale.toFixed(1) + '×';
+  }
+
+  // ------------------------------------------------------------
+  // Рисование
+  // ------------------------------------------------------------
+  function render() {
+    if (!mapState) { clearCanvas(); return; }
+    if (view.autoFit) autoFitBounds();
+    clearCanvas();
+    if ($('showGrid').checked) drawGrid();
+    if ($('showTrail').checked) drawTrail();
+    drawOrigin();
+    drawDevice();
+  }
+
+  function clearCanvas() {
+    ctx.fillStyle = '#0b0f12';
+    ctx.fillRect(0, 0, cssW(), cssH());
+  }
+
+  function drawGrid() {
+    var step = 20;
+    var stepScreen = step * view.scale;
+    while (stepScreen < 30)  { step *= 2; stepScreen *= 2; }
+    while (stepScreen > 140) { step /= 2; stepScreen /= 2; }
+
+    var tl = screenToWorld(0, 0);
+    var br = screenToWorld(cssW(), cssH());
+    var minWX = Math.min(tl.x, br.x), maxWX = Math.max(tl.x, br.x);
+    var minWY = Math.min(tl.y, br.y), maxWY = Math.max(tl.y, br.y);
+
+    var startX = Math.floor(minWX / step) * step;
+    var endX   = Math.ceil (maxWX / step) * step;
+    var startY = Math.floor(minWY / step) * step;
+    var endY   = Math.ceil (maxWY / step) * step;
+
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#182028';
+    for (var x = startX; x <= endX; x += step) {
+      var p1 = worldToScreen(x, minWY);
+      var p2 = worldToScreen(x, maxWY);
+      ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+    }
+    for (var y = startY; y <= endY; y += step) {
+      var p1 = worldToScreen(minWX, y);
+      var p2 = worldToScreen(maxWX, y);
+      ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+    }
+
+    // Оси
+    ctx.strokeStyle = '#2a3542';
+    ctx.lineWidth = 1.5;
+    var xa = worldToScreen(0, minWY), xb = worldToScreen(0, maxWY);
+    ctx.beginPath(); ctx.moveTo(xa.x, xa.y); ctx.lineTo(xb.x, xb.y); ctx.stroke();
+    var ya = worldToScreen(minWX, 0), yb = worldToScreen(maxWX, 0);
+    ctx.beginPath(); ctx.moveTo(ya.x, ya.y); ctx.lineTo(yb.x, yb.y); ctx.stroke();
+
+    // Подписи
+    ctx.fillStyle = '#5a6a7a';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    var org = worldToScreen(0, 0);
+    for (var x = startX; x <= endX; x += step) {
+      if (x === 0) continue;
+      var p = worldToScreen(x, 0);
+      if (p.x > 22 && p.x < cssW() - 22) {
+        ctx.fillText(String(x), p.x, Math.min(Math.max(org.y + 14, 14), cssH()-4));
+      }
+    }
+    ctx.textAlign = 'right';
+    for (var y = startY; y <= endY; y += step) {
+      if (y === 0) continue;
+      var p = worldToScreen(0, y);
+      if (p.y > 12 && p.y < cssH() - 12) {
+        ctx.fillText(String(y), Math.min(Math.max(org.x - 4, 24), cssW()-4), p.y + 3);
+      }
+    }
+  }
+
+  function drawTrail() {
+    if (trail.length < 2) return;
+    ctx.lineWidth = 1.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (var i = 1; i < trail.length; i++) {
+      var a = trail[i-1], b = trail[i];
+      var p1 = worldToScreen(a.x, a.y);
+      var p2 = worldToScreen(b.x, b.y);
+      var age = trail.length - i;
+      var alpha = Math.max(0.12, 1 - age / Math.max(1, trail.length));
+      ctx.strokeStyle = 'rgba(108,204,255,' + alpha.toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+    }
+  }
+
+  function drawOrigin() {
+    var o = worldToScreen(0, 0);
+    ctx.strokeStyle = '#484';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(o.x - 10, o.y); ctx.lineTo(o.x + 10, o.y);
+    ctx.moveTo(o.x, o.y - 10); ctx.lineTo(o.x, o.y + 10);
+    ctx.stroke();
+    ctx.fillStyle = '#484';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('0', o.x + 8, o.y - 6);
+  }
+
+  function drawDevice() {
+    var p = worldToScreen(mapState.x_px || 0, mapState.y_px || 0);
+    var rot = mapState.rotation_deg || 0;
+
+    // В canvas Y растёт вниз; мы флипнули Y → «вверх» = -Y.
+    // rotation_deg = 0 → вершина смотрит вверх.
+    // Угол в canvas: -90° (вверх) + rotation_deg (по часовой).
+    var tip = (-90 + rot) * Math.PI / 180;
+
+    var size = 16;
+    var x1 = p.x + Math.cos(tip) * size;
+    var y1 = p.y + Math.sin(tip) * size;
+
+    var back = 2.6; // ≈150°
+    var x2 = p.x + Math.cos(tip + back) * size * 0.7;
+    var y2 = p.y + Math.sin(tip + back) * size * 0.7;
+    var x3 = p.x + Math.cos(tip - back) * size * 0.7;
+    var y3 = p.y + Math.sin(tip - back) * size * 0.7;
+
+    // тень
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();
+    ctx.moveTo(x1+2, y1+2); ctx.lineTo(x2+2, y2+2); ctx.lineTo(x3+2, y3+2);
+    ctx.closePath(); ctx.fill();
+
+    // тело
+    ctx.fillStyle = '#3c6';
+    ctx.beginPath();
+    ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x3, y3);
+    ctx.closePath(); ctx.fill();
+
+    // контур
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // вершина — жирная точка для акцента
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(x1, y1, 2.5, 0, 2 * Math.PI);
+    ctx.fill();
+
+    // центр
+    ctx.fillStyle = '#0b0f12';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 2.5, 0, 2 * Math.PI);
+    ctx.fill();
+
+    // проекция «вперёд»
+    ctx.strokeStyle = 'rgba(108,204,255,0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  }
+
+  // ------------------------------------------------------------
+  // Панорама мышью
+  // ------------------------------------------------------------
+  var drag = null;
+  canvas.addEventListener('mousedown', function(e){
+    drag = { sx: e.clientX, sy: e.clientY, ox: view.offsetX, oy: view.offsetY };
+    view.autoFit = false;
+  });
+  window.addEventListener('mousemove', function(e){
+    if (!drag) return;
+    var dx = e.clientX - drag.sx;
+    var dy = e.clientY - drag.sy;
+    view.offsetX = drag.ox - dx / view.scale;
+    view.offsetY = drag.oy + dy / view.scale;
+    render();
+  });
+  window.addEventListener('mouseup', function(){ drag = null; });
+
+  // Touch
+  var touchStart = null;
+  canvas.addEventListener('touchstart', function(e){
+    if (e.touches.length === 1) {
+      touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY,
+                     ox: view.offsetX, oy: view.offsetY };
+      view.autoFit = false;
+    }
+  }, {passive:true});
+  canvas.addEventListener('touchmove', function(e){
+    if (!touchStart || e.touches.length !== 1) return;
+    var t = e.touches[0];
+    view.offsetX = touchStart.ox - (t.clientX - touchStart.x) / view.scale;
+    view.offsetY = touchStart.oy + (t.clientY - touchStart.y) / view.scale;
+    render();
+    e.preventDefault();
+  }, {passive:false});
+  canvas.addEventListener('touchend', function(){ touchStart = null; });
+
+  // Wheel zoom к курсору
+  canvas.addEventListener('wheel', function(e){
+    e.preventDefault();
+    var rect = canvas.getBoundingClientRect();
+    var mx = e.clientX - rect.left;
+    var my = e.clientY - rect.top;
+    var w = screenToWorld(mx, my);
+    var factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    view.scale = Math.max(0.2, Math.min(15, view.scale * factor));
+    // сохранить точку под курсором
+    var cx = cssW()/2, cy = cssH()/2;
+    view.offsetX = w.x - (mx - cx) / view.scale;
+    view.offsetY = w.y + (my - cy) / view.scale;
+    view.autoFit = false;
+    $('zoomSlider').value = view.scale;
+    $('zoomVal').textContent = view.scale.toFixed(1) + '×';
+    render();
+  }, {passive:false});
+
+  // ------------------------------------------------------------
+  // Управление
+  // ------------------------------------------------------------
+  function resetView() {
+    view.autoFit = true;
+    render();
+  }
+  function centerOnDevice() {
+    if (!mapState) return;
+    view.autoFit = false;
+    view.offsetX = mapState.x_px || 0;
+    view.offsetY = mapState.y_px || 0;
+    render();
+  }
+  function clearTrail() {
+    trail = [];
+    render();
+  }
+  function doResetPos() {
+    if (!confirm('Сбросить позицию, поворот и след?')) return;
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/reset', true);
+    xhr.onload = function() { poll(); };
+    xhr.send();
+  }
+
+  // ------------------------------------------------------------
+  // Polling
+  // ------------------------------------------------------------
+  function poll() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/sensor/map', true);
+    xhr.onload = function() {
+      if (xhr.status !== 200) return;
+      try {
+        var st = JSON.parse(xhr.responseText);
+        mapState = st;
+        if (st.trail && st.trail.length > 0) {
+          trail = st.trail.slice();
+        } else {
+          trail = [];
+        }
+        $('stX').textContent      = (st.x_px || 0).toFixed(2);
+        $('stY').textContent      = (st.y_px || 0).toFixed(2);
+        $('stRot').textContent    = (st.rotation_deg || 0).toFixed(1);
+        $('stDb').textContent     = (st.deadband_px || 0).toFixed(3);
+        $('stTrail').textContent  = (st.trail_count || 0);
+        $('stCal').textContent    = st.calibrated ? '✓' : '—';
+        render();
+      } catch (e) {}
+    };
+    xhr.send();
+  }
+
+  $('zoomSlider').addEventListener('input', function(){
+    view.scale = parseFloat(this.value);
+    view.autoFit = false;
+    $('zoomVal').textContent = view.scale.toFixed(1) + '×';
+    render();
+  });
+  $('showTrail').addEventListener('change', render);
+  $('showGrid').addEventListener('change', render);
+
+  window.addEventListener('resize', resizeCanvas);
+  window.resetView        = resetView;
+  window.centerOnDevice   = centerOnDevice;
+  window.clearTrail       = clearTrail;
+  window.doResetPos       = doResetPos;
+
+  resizeCanvas();
+  poll();
+  setInterval(poll, 250);
+})();
+</script>
+</body>
+</html>
