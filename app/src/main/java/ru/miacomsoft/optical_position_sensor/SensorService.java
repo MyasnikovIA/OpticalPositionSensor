@@ -113,7 +113,9 @@ public class SensorService extends Service {
     private double posX = 0.0, posY = 0.0;
     private double zeroX = 0.0, zeroY = 0.0;
     private long   zeroSetAtMs = 0L;
-    private volatile boolean forcePublish = false;
+    private volatile boolean forcePublish  = false;
+    private volatile long    settleUntilMs = 0L;   // <<< НОВОЕ
+
 
     private final SimpleDateFormat iso = new SimpleDateFormat(
             "yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US);
@@ -128,6 +130,12 @@ public class SensorService extends Service {
     private static final int    CALIB_TARGET_SAMPLES = 60;    // ~2 сек при 30fps
     private static final long   CALIB_TIMEOUT_MS      = 5000;
     private static final double CALIB_REJECT_PX       = 5.0;  // «пользователь двинул»
+
+
+    private static final int    CALIB_MIN_SAMPLES    = 30;
+    private static final int    CALIB_MAX_MULTIPLIER = 3;    // жёсткий стоп на 3×duration
+    private volatile long calibTargetMs = 0L;
+
 
     // ---- Список разрешений камеры (кэш) ----
     private volatile org.json.JSONArray cachedCameraSizes = null;
@@ -212,10 +220,11 @@ public class SensorService extends Service {
             zeroY = posY;
             zeroSetAtMs = System.currentTimeMillis();
         }
-        // Трейл и totalRotationDeg намеренно НЕ сбрасываются:
-        // setZero лишь сдвигает начало координат, история и ориентация сохраняются.
-        forcePublish = true;
-        Log.i(TAG, "Zero set at (" + zeroX + ", " + zeroY + ")");
+        // settle: 300 мс — чтобы новый «0» не «уплыл» шумом первых кадров.
+        // Трейл НЕ очищается — история сохраняется (иначе setZero теряло бы смысл).
+        settleUntilMs = System.currentTimeMillis() + 300;
+        forcePublish  = true;
+        Log.i(TAG, "Zero set at (" + zeroX + ", " + zeroY + "), settle 300ms");
     }
 
     /**
@@ -232,10 +241,13 @@ public class SensorService extends Service {
         synchronized (trailLock) {
             trail.clear();
             trail.add(new double[]{0, 0, 0, System.currentTimeMillis()});
-            lastTrailX = 0; lastTrailY = 0;
+            lastTrailX = 0;
+            lastTrailY = 0;
         }
-        forcePublish = true;
-        Log.i(TAG, "Position and rotation reset");
+        // settle: 500 мс без накопления — позиция и трейл гарантированно стоят в 0
+        settleUntilMs = System.currentTimeMillis() + 500;
+        forcePublish  = true;
+        Log.i(TAG, "Position and rotation reset (settle 500ms)");
     }
 
     private JSONObject positionJson() {
@@ -271,16 +283,32 @@ public class SensorService extends Service {
 // Калибровка покоя (static-point calibration)
 // ==============================================================
 
+    /** Backwards-compat: использует config.calibDurationSec. */
     public synchronized void startCalibStatic(boolean thenZero) {
+        startCalibStatic(thenZero, config.calibDurationSec);
+    }
+
+    /** Основной: с явно заданной длительностью в секундах (мин 5, макс 60). */
+    public synchronized void startCalibStatic(boolean thenZero, int durationSec) {
+        if (!sensorRunning) {
+            synchronized (calibLock) {
+                calibStatus = "error_sensor_stopped";
+                calibActive = false;
+            }
+            Log.w(TAG, "Calib: sensor not running");
+            return;
+        }
+        int d = Math.max(5, Math.min(60, durationSec));
         synchronized (calibLock) {
             calibSamples.clear();
             calibActive = true;
             calibPendingZero = thenZero;
             calibStartMs = System.currentTimeMillis();
+            calibTargetMs = d * 1000L;
             calibStatus = "sampling";
         }
-        Log.i(TAG, "Calib start, thenZero=" + thenZero
-                + ", target=" + CALIB_TARGET_SAMPLES);
+        Log.i(TAG, "Calib start: duration=" + d + "s, thenZero=" + thenZero
+                + ", minSamples=" + CALIB_MIN_SAMPLES);
     }
 
     public synchronized void applyCalibNow() {
@@ -314,7 +342,7 @@ public class SensorService extends Service {
         synchronized (calibLock) {
             if (!calibActive) return;
 
-            // Аборт при явном движении
+            // Резкий скачок — считаем, что пользователь двинул устройство
             if (Math.hypot(dx, dy) > CALIB_REJECT_PX) {
                 calibSamples.clear();
                 calibActive = false;
@@ -326,19 +354,36 @@ public class SensorService extends Service {
 
             calibSamples.add(new double[]{dx, dy});
 
-            boolean targetReached = calibSamples.size() >= CALIB_TARGET_SAMPLES;
-            boolean timeout = (System.currentTimeMillis() - calibStartMs) >= CALIB_TIMEOUT_MS;
-            if (targetReached || timeout) {
+            long elapsed   = System.currentTimeMillis() - calibStartMs;
+            boolean timeUp = elapsed >= calibTargetMs;
+            boolean enough = calibSamples.size() >= CALIB_MIN_SAMPLES;
+
+            // Применяем, когда прошло время И накопилось минимум сэмплов
+            if (timeUp && enough) {
                 applyCalibFromSamples();
+                return;
+            }
+            // Аварийный выход: 3×duration
+            if (elapsed >= calibTargetMs * CALIB_MAX_MULTIPLIER) {
+                if (calibSamples.size() >= 10) {
+                    applyCalibFromSamples();
+                } else {
+                    calibStatus = "error_too_few";
+                    calibActive = false;
+                    calibPendingZero = false;
+                    Log.w(TAG, "Calib failed: too few samples ("
+                            + calibSamples.size() + ")");
+                }
             }
         }
     }
 
     private void applyCalibFromSamples() {
         int n = calibSamples.size();
-        if (n < 3) {
+        if (n < 10) {
             calibStatus = "error_too_few";
             calibActive = false;
+            calibPendingZero = false;
             return;
         }
 
@@ -358,8 +403,8 @@ public class SensorService extends Service {
 
         config.posBiasX      = meanX;
         config.posBiasY      = meanY;
-        // 3-сигма, но не меньше 0.05 и не больше 2.0
-        config.posDeadbandPx = Math.max(0.05, Math.min(2.0, 3.0 * std));
+        // 3.5σ — строже, чем 3σ; floor 0.15 — защита от сверхузкого порога
+        config.posDeadbandPx = Math.max(0.15, Math.min(3.0, 3.5 * std));
         config.posCalibrated = true;
 
         try { ConfigStore.save(getApplicationContext(), config); }
@@ -377,6 +422,7 @@ public class SensorService extends Service {
                 zeroY = posY;
                 zeroSetAtMs = System.currentTimeMillis();
             }
+            settleUntilMs = System.currentTimeMillis() + 300;
             forcePublish = true;
         }
 
@@ -391,16 +437,38 @@ public class SensorService extends Service {
         try {
             JSONObject o = new JSONObject();
             synchronized (calibLock) {
-                o.put("status", calibStatus);
-                o.put("active", calibActive);
-                o.put("samples", calibSamples.size());
-                o.put("targetSamples", CALIB_TARGET_SAMPLES);
-                o.put("pendingZero", calibPendingZero);
+                o.put("status",       calibStatus);
+                o.put("active",       calibActive);
+                o.put("samples",      calibSamples.size());
+                o.put("minSamples",   CALIB_MIN_SAMPLES);
+                o.put("pendingZero",  calibPendingZero);
+
+                long elapsed = calibActive
+                        ? (System.currentTimeMillis() - calibStartMs) : 0;
+                o.put("elapsedMs", elapsed);
+                o.put("targetMs",  calibTargetMs);
+
+                double progress;
+                if (calibActive && calibTargetMs > 0) {
+                    progress = Math.min(1.0, (double) elapsed / calibTargetMs);
+                } else if ("done".equals(calibStatus)) {
+                    progress = 1.0;
+                } else {
+                    progress = 0.0;
+                }
+                o.put("progress", progress);
+
+                double remainSec = 0;
+                if (calibActive && calibTargetMs > 0) {
+                    remainSec = Math.max(0, (calibTargetMs - elapsed) / 1000.0);
+                }
+                o.put("remainSec", remainSec);
             }
             o.put("posBiasX",        config.posBiasX);
             o.put("posBiasY",        config.posBiasY);
             o.put("posDeadbandPx",   config.posDeadbandPx);
             o.put("posCalibrated",   config.posCalibrated);
+            o.put("durationSec",     config.calibDurationSec);
             return o;
         } catch (Exception e) { return new JSONObject(); }
     }
@@ -561,24 +629,30 @@ public class SensorService extends Service {
     public synchronized void startSensorOnly() {
         if (sensorRunning) return;
 
+        // ---- 1. Конфигурируем трекер (включая contrast) ----
         tracker.configure(
                 config.targetWidth, config.searchRadius, config.blockSize,
                 config.flowMinVariance, config.flowMinGradient, config.maxSadPx,
                 config.flowSubpixel, config.flowTemporalSmoothing,
                 config.flowTemporalAlpha, config.flowMaxMotionPx,
-                config.trackerContrast);                         // <<< контраст
+                config.trackerContrast);
 
+        // ---- 2. Worker-поток ----
         if (worker == null) {
             worker = new HandlerThread("SensorWorker");
             worker.start();
             workerHandler = new Handler(worker.getLooper());
         }
 
+        // ---- 3. Открыть камеру (учитывает config.cameraId) ----
         if (!openCamera()) {
-            lastCameraError = "Не удалось открыть камеру...";
+            lastCameraError = "Не удалось открыть камеру. Закройте другие приложения "
+                    + "с камерой и нажмите «Запустить».";
+            Log.e(TAG, "startSensorOnly: camera open failed");
             return;
         }
 
+        // ---- 4. Фонарик (камера уже открыта, передаём её контроллеру) ----
         try {
             flashlight = new FlashlightController(getApplicationContext());
             flashlight.init();
@@ -590,11 +664,14 @@ public class SensorService extends Service {
             flashlight = null;
         }
 
+        // ---- 5. Флаги состояния ----
         sensorRunning = true;
         lastCameraError = "";
         lastPublishMs   = 0L;
         lastFlashState  = "";
         skippedReadings = 0L;
+
+        // ---- 6. Сброс позиции, поворота, трейла и settle-окна ----
         synchronized (positionLock) {
             posX = 0.0; posY = 0.0;
             zeroX = 0.0; zeroY = 0.0;
@@ -604,19 +681,25 @@ public class SensorService extends Service {
         synchronized (trailLock) {
             trail.clear();
             trail.add(new double[]{0, 0, 0, System.currentTimeMillis()});
-            lastTrailX = 0; lastTrailY = 0;
+            lastTrailX = 0;
+            lastTrailY = 0;
         }
+        settleUntilMs = System.currentTimeMillis() + 300;   // settle 300 мс после старта
+        forcePublish  = true;                                // форс-публикация первого кадра
 
-
+        // ---- 7. Сброс калибровки покоя (бias/deadband берутся из config) ----
         synchronized (calibLock) {
             calibSamples.clear();
             calibActive = false;
             calibPendingZero = false;
             calibStatus = config.posCalibrated ? "done" : "idle";
         }
-        forcePublish = true;
 
-        Log.i(TAG, "Sensor started ...");
+        // ---- 8. Лог + уведомление ----
+        Log.i(TAG, "Sensor started " + previewWidth + "x" + previewHeight
+                + ", cameraId=" + (config.cameraId >= 0
+                ? String.valueOf(config.cameraId) : "default")
+                + ", flashlight=" + (flashlight != null && flashlight.isAvailable()));
         updateNotification(buildStatusLine());
     }
     public JSONObject mapJson() {
@@ -1043,38 +1126,41 @@ public class SensorService extends Service {
             if (config.invertDx) dx = -dx;
             if (config.invertDy) dy = -dy;
 
-            // ---- 2. Накопление позиции + поворота ----
-            if (r.valid) {
+            // ---- 2. Settle / force ----
+            boolean settling = timestamp < settleUntilMs;
+            boolean forced   = forcePublish;
+            if (forced) forcePublish = false;
+            boolean skipAccum = settling || forced;
+
+            // ---- 3. Накопление с МЯГКИМ ПООСЕВЫМ deadband ----
+            if (r.valid && !skipAccum) {
                 collectCalibSample(dx, dy);
 
-                // deadband и bias — в системе трекера (dx, dy), ДО пересчёта осей
                 double adjDx = dx - config.posBiasX;
                 double adjDy = dy - config.posBiasY;
-                double mag   = Math.hypot(adjDx, adjDy);
 
-                if (mag >= config.posDeadbandPx) {
-                    // >>> ПЕРЕСЧЁТ В «ЧЕЛОВЕЧЕСКИЕ» ОСИ СЕРВЕРА <<<
-                    //
-                    // До правки (дефолт invertDx=false, invertDy=true, rot=0):
-                    //   вперёд → adjDx < 0   (adjDx = «назад+»)
-                    //   назад  → adjDx > 0
-                    //   вправо → adjDy > 0   (adjDy = «вправо+»)
-                    //   влево  → adjDy < 0
-                    //
-                    // Хотим на сервере:
-                    //   posX+ = вправо
-                    //   posY+ = вперёд
-                    //
-                    // Значит:
-                    //   posX += +adjDy   (вправо → +X)
-                    //   posY += −adjDx   (вперёд → +Y)
+                // Мягкий deadband по каждой оси:
+                //   |adj| <  threshold  →  0
+                //   |adj| >= threshold  →  (|adj| - threshold) * sign(adj)
+                // Шум ниже порога полностью отсечён, шум чуть выше — почти не даёт вклада,
+                // реальное движение (>> threshold) проходит почти полностью.
+                double threshold = config.posDeadbandPx;
+                double ddx = 0.0, ddy = 0.0;
+                if (Math.abs(adjDx) >= threshold) {
+                    ddx = adjDx - Math.signum(adjDx) * threshold;
+                }
+                if (Math.abs(adjDy) >= threshold) {
+                    ddy = adjDy - Math.signum(adjDy) * threshold;
+                }
+                if (ddx != 0.0 || ddy != 0.0) {
+                    // «Человеческие» оси: posX+ = вправо, posY+ = вперёд
                     synchronized (positionLock) {
-                        posX += adjDy;
-                        posY += -adjDx;
+                        posX += ddy;
+                        posY += -ddx;
                     }
                 }
 
-                // Накопление поворота (не зависит от имён posX/posY)
+                // Накопление поворота
                 if (r.confidence >= 0.15
                         && r.blocksUsed >= Math.max(8, r.blocksTotal / 6)
                         && Math.abs(r.rotationDeg) > config.rotDeadbandDeg) {
@@ -1082,7 +1168,7 @@ public class SensorService extends Service {
                     totalRotationDeg += rotSign * r.rotationDeg;
                 }
 
-                // Трейл — использует уже переименованные posX/posY
+                // Трейл
                 synchronized (trailLock) {
                     double dxT = posX - lastTrailX;
                     double dyT = posY - lastTrailY;
@@ -1095,11 +1181,10 @@ public class SensorService extends Service {
                 }
             }
 
-            // Для shift.* оставляем dx/dy в системе трекера (это «дельты за кадр»)
+            // ---- 4. JSON ----
             double distance     = Math.hypot(dx, dy);
             double directionDeg = normalizeDeg(Math.toDegrees(Math.atan2(dy, dx)));
 
-            // ---- 4. JSON ----
             JSONObject reading = new JSONObject();
             reading.put("seq", seq);
             reading.put("timestamp_ms", timestamp);
@@ -1126,6 +1211,8 @@ public class SensorService extends Service {
             shift.put("mount_rotation_deg",  rot);
             shift.put("invert_dx",           config.invertDx);
             shift.put("invert_dy",           config.invertDy);
+            shift.put("settling",            settling);
+            shift.put("skip_accum",          skipAccum);
             reading.put("shift", shift);
 
             reading.put("position", positionJson());
@@ -1154,11 +1241,8 @@ public class SensorService extends Service {
             boolean shouldPublish;
             String  reason;
 
-            boolean forced = forcePublish;
-            if (forced) forcePublish = false;
-
             if (forced) {
-                shouldPublish = true;  reason = "force";
+                shouldPublish = true;  reason = settling ? "force_settling" : "force";
             } else if (!config.publishOnlyOnChange) {
                 shouldPublish = true;  reason = "always";
             } else if (lastPublishMs == 0L) {

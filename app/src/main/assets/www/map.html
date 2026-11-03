@@ -457,11 +457,24 @@
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/sensor/reset', true);
     xhr.onload = function() {
+      // мгновенно чистим клиентское состояние — не ждём GET /map
       trail = [];
+      if (mapState) {
+        mapState.x_px = 0;
+        mapState.y_px = 0;
+        mapState.rotation_deg = 0;
+        mapState.trail_count = 0;
+      }
+      lastZeroAt = -1;   // форсируем refetch при первом SSE-событии
+      updateCounters();
+      render();
       fetchFullSnapshot();
     };
+    xhr.onerror = function() {
+      showBanner('Ошибка сети при сбросе позиции');
+    };
     xhr.send();
-  }
+}
   function forceFullRefresh() {
     fetchFullSnapshot();
   }

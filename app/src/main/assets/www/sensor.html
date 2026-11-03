@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Live — OpticalPositionSensor</title>
+    <link rel="icon" href="data:,">
     <style>
   body{margin:0;background:#101418;color:#e6f0f4;font:14px/1.4 monospace;padding:0}
   header{background:#182028;padding:10px 14px;display:flex;justify-content:space-between;
@@ -19,7 +20,7 @@
   .banner.ok{background:#1c4a2c;color:#cfc;border-left:4px solid #3c3}
   .card{background:#182028;border-radius:8px;padding:12px;margin-bottom:12px}
   .card h2{font-size:14px;margin:0 0 10px;color:#adf}
-  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   .kv{flex:1;min-width:110px;background:#0e1418;border-radius:6px;padding:8px}
   .k{color:#8aa;font-size:11px;text-transform:uppercase}
   .v{font-size:18px;color:#6cf}
@@ -65,14 +66,17 @@
   .calibBar .fill{height:100%;background:#3c6;transition:width 0.15s linear}
   .calibBar.done{color:#cfc}
   .calibBar.aborted{color:#fcc}
+  .durInput{background:#0e1418;color:#e6f0f4;border:1px solid #234;
+            border-radius:4px;padding:6px 8px;width:100%;box-sizing:border-box;
+            font-family:monospace;font-size:13px}
 </style>
 </head>
 <body>
 <header>
     <h1>Live</h1>
     <nav>
-        <a href="index.html" class="active">Информация</a>
-        <a href="sensor.html">Live</a>
+        <a href="index.html">Информация</a>
+        <a href="sensor.html" class="active">Live</a>
         <a href="map.html">Карта</a>
         <a href="config.html">Настройки</a>
     </nav>
@@ -82,7 +86,7 @@
     <div id="banner" class="banner err" style="display:none"></div>
 
     <!-- ================= ПОДКЛЮЧЕНИЕ ================= -->
-    <div class="card">
+    <div class="card" id="connectCard">
         <h2>Подключение</h2>
         <div style="color:#8aa;font-size:11px;text-transform:uppercase;margin-bottom:4px">
             Адрес для подключения
@@ -95,10 +99,11 @@
         <div style="margin-top:10px;color:#8aa;font-size:11px">
             <div>IP-адрес: <span id="ipText" style="color:#adf">—</span></div>
             <div>Активный порт: <span id="portText" style="color:#adf">—</span></div>
+            <div>Устройство доступно с других ПК/телефонов в той же сети Wi-Fi.</div>
         </div>
     </div>
 
-    <!-- ================= ПОЗИЦИЯ ================= -->
+    <!-- ================= ПОЗИЦИЯ И КАЛИБРОВКА ================= -->
     <div class="card">
         <h2>Позиция от нуля</h2>
 
@@ -109,14 +114,26 @@
             <div class="posItem"><div class="k">направление</div><div class="v" id="posDir">—</div></div>
         </div>
 
+        <div class="row" style="margin-bottom:8px">
+            <div style="flex:1;min-width:200px">
+                <label style="display:block;color:#adf;font-size:12px;margin:0 0 4px">
+                    Длительность калибровки, сек (5–60)
+                </label>
+                <input id="calibDurationSec" type="number" min="5" max="60" step="1"
+                       class="durInput">
+            </div>
+        </div>
+
         <div style="margin-bottom:8px">
             <button class="green big" onclick="doZero()">🎯 Установить ноль</button>
             <button class="orange big" onclick="doCalib(true)">⏱ Калибровать покой + ноль</button>
-            <button onclick="doResetPos()">↺ Сбросить накопление</button>
+            <button onclick="doCalib(false)">⏱ Только калибровка</button>
+            <button onclick="doResetPos()">↺ Сброс накопления</button>
         </div>
 
         <div class="calibBar" id="calibBar">
             Калибровка: <span id="calibStatus">—</span>
+            <span id="calibRemain"></span>
             <div class="progress" id="calibProg" style="display:none">
                 <div class="fill" id="calibFill" style="width:0%"></div>
             </div>
@@ -124,14 +141,20 @@
         </div>
 
         <div class="hint">
-            <b>🎯 Установить ноль</b> — мгновенно: текущее положение становится (0,0).<br>
-            <b>⏱ Калибровать покой + ноль</b> — 2 секунды замера шума + ноль
-            (не двигайте устройство!). После этого позиция <b>не уплывает</b>.<br>
-            <b>↺ Сбросить накопление</b> — обнуляет и накопленное смещение, и точку отсчёта
-            (лечит дрейф после долгой работы).<br>
+            <b>🎯 Установить ноль</b> — мгновенно: текущее физическое положение
+            становится точкой (0,0). Дальнейшие X/Y считаются от неё.<br>
+            <b>⏱ Калибровать покой + ноль</b> — замер шума <b>N секунд</b>
+            (по умолчанию 5, можно изменить в поле выше), затем установка нуля.
+            <b>Не двигайте прибор во время замера!</b> После калибровки скорректированы
+            два параметра: <code>posBiasX/Y</code> (систематическая ошибка) и
+            <code>posDeadbandPx</code> (порог шума = 3.5σ). Благодаря этому позиция
+            <b>не уплывает</b> в покое.<br>
+            <b>↺ Сброс накопления</b> — обнуляет и накопленное смещение, и точку
+            отсчёта (лечит накопленный дрейф после долгой работы).<br>
             <br>
-            Рекомендация: сначала «Калибровать покой + ноль», при смене условий — заново.
-            При чистом «Установить ноль» без калибровки позиция может уплывать из-за шума.
+            <b>Рекомендация:</b> сначала «Калибровать покой + ноль».
+            «Установить ноль» без калибровки — позиция может уплывать из-за шума.
+            При смене условий освещения — повторите калибровку.
         </div>
     </div>
 
@@ -162,7 +185,7 @@
         </div>
     </div>
 
-    <!-- ================= ДВИЖЕНИЕ ================= -->
+    <!-- ================= ДВИЖЕНИЕ ЗА КАДР ================= -->
     <div class="card">
         <h2>Движение за кадр</h2>
         <div class="row">
@@ -174,7 +197,7 @@
         </div>
     </div>
 
-    <!-- ================= ФОНАРИК ================= -->
+    <!-- ================= ФОНАРИК + КАЧЕСТВО ================= -->
     <div class="card">
         <h2>Фонарик и качество</h2>
         <div class="row">
@@ -189,6 +212,7 @@
             <button onclick="setFlash('on')">Фонарь ON</button>
             <button onclick="setFlash('auto')">Фонарь AUTO</button>
         </div>
+        <pre id="flashDebug" style="margin-top:10px;font-size:11px;color:#8aa;max-height:180px">—</pre>
     </div>
 
     <!-- ================= JSON ================= -->
@@ -239,6 +263,9 @@
     legacyCopy(text);
   }
 
+  // ------------------------------------------------------------
+  // Состояние, поля
+  // ------------------------------------------------------------
   function setState(running) {
     var p = $('statePill');
     if (running) { p.className = 'pill on';  p.textContent = 'RUNNING'; }
@@ -259,6 +286,7 @@
     if (typeof f.lux === 'number' && f.lux >= 0) {
       $('lux').textContent = f.lux.toFixed(0) + ' lx';
     }
+    $('flashDebug').textContent = JSON.stringify(f, null, 2);
   }
 
   function renderPosition(p) {
@@ -271,29 +299,54 @@
       $('posDir').textContent = p.direction_from_zero_deg.toFixed(1) + '°';
   }
 
+  // ------------------------------------------------------------
+  // Калибровка: отображение прогресса
+  // ------------------------------------------------------------
   function renderCalib(c) {
     if (!c) return;
     var bar = $('calibBar');
     var st  = c.status || 'idle';
     bar.className = 'calibBar';
+
     if (st === 'sampling') {
-      var pct = Math.min(100, Math.round(100.0 * (c.samples||0) / Math.max(1, c.targetSamples||60)));
+      var pct = Math.round(100 * (c.progress || 0));
+      if (pct > 100) pct = 100;
+      if (pct < 0) pct = 0;
       $('calibProg').style.display = '';
       $('calibFill').style.width = pct + '%';
-      $('calibStatus').textContent = '⏱ замер ' + (c.samples||0) + '/' + (c.targetSamples||60)
-                                     + ' (' + pct + '%)';
+      $('calibStatus').textContent = '⏱ замер ' + pct + '%';
+      var rem = c.remainSec || 0;
+      $('calibRemain').textContent = rem > 0
+              ? ' (осталось ~' + rem.toFixed(1) + ' с)'
+              : '';
     } else {
       $('calibProg').style.display = 'none';
-      if (st === 'done')         { $('calibStatus').textContent = '✓ калибровка применена'; bar.className += ' done'; }
-      else if (st === 'aborted_motion') { $('calibStatus').textContent = '✗ прервано: движение'; bar.className += ' aborted'; }
-      else if (st === 'idle')    { $('calibStatus').textContent = 'не откалибровано'; }
-      else                       { $('calibStatus').textContent = st; }
+      $('calibRemain').textContent = '';
+      if (st === 'done') {
+        $('calibStatus').textContent = '✓ калибровка применена';
+        bar.className += ' done';
+      } else if (st === 'aborted_motion') {
+        $('calibStatus').textContent = '✗ прервано: движение';
+        bar.className += ' aborted';
+      } else if (st === 'error_too_few') {
+        $('calibStatus').textContent = '✗ мало сэмплов';
+        bar.className += ' aborted';
+      } else if (st === 'error_sensor_stopped') {
+        $('calibStatus').textContent = '✗ камера остановлена';
+        bar.className += ' aborted';
+      } else if (st === 'idle') {
+        $('calibStatus').textContent = 'не откалибровано';
+      } else {
+        $('calibStatus').textContent = st;
+      }
     }
+
     var det = '';
     det += 'bias X = ' + (c.posBiasX||0).toFixed(3) + ' px, '
          + 'bias Y = ' + (c.posBiasY||0).toFixed(3) + ' px<br>';
     det += 'deadband = ' + (c.posDeadbandPx||0).toFixed(3) + ' px · ';
-    det += 'calibrated: ' + (c.posCalibrated ? '✓' : '—');
+    det += 'calibrated: ' + (c.posCalibrated ? '✓' : '—') + ' · ';
+    det += 'samples: ' + (c.samples||0) + '/' + (c.minSamples||30);
     $('calibDetails').innerHTML = det;
   }
 
@@ -324,6 +377,9 @@
     } catch (e) { setTimeout(connectSSE, 3000); }
   }
 
+  // ------------------------------------------------------------
+  // Статус сервиса
+  // ------------------------------------------------------------
   function refreshStatus() {
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '/api/sensor/status', true);
@@ -337,7 +393,17 @@
         }
         if (st.flashlight) updateFlashUi(st.flashlight);
         if (st.position)   renderPosition(st.position);
-        if (st.calib)      renderCalib(st.calib);
+
+        // калибровка: обновление прогресса + подстановка duration при первом старте
+        if (st.calib) {
+          renderCalib(st.calib);
+          if (typeof st.calib.durationSec === 'number'
+                  && !$('calibDurationSec').dataset.touched
+                  && (!$('calibDurationSec').value
+                      || isNaN(parseInt($('calibDurationSec').value, 10)))) {
+            $('calibDurationSec').value = st.calib.durationSec;
+          }
+        }
 
         var ip = st.localIp || '—';
         var port = st.httpPortActive || st.httpPort || 8080;
@@ -361,7 +427,8 @@
               ? Math.round((new Date().getTime()) - st.lastPublishMs) : -1;
           info = 'публикаций: ' + (st.publishSeq||0)
                + ' • пропущено: ' + (st.skippedReadings||0);
-          if (ago >= 0) info += ' • последняя ' + (ago < 1000 ? 'сейчас' : (ago/1000).toFixed(1)+' с назад');
+          if (ago >= 0) info += ' • последняя '
+               + (ago < 1000 ? 'сейчас' : (ago/1000).toFixed(1)+' с назад');
         }
         $('pubInfo').textContent = info;
 
@@ -383,6 +450,9 @@
     xhr.send();
   }
 
+  // ------------------------------------------------------------
+  // Управление камерой
+  // ------------------------------------------------------------
   function doStart() {
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/sensor/start', true);
@@ -406,6 +476,9 @@
     xhr.send(JSON.stringify({mode: mode}));
   }
 
+  // ------------------------------------------------------------
+  // НОЛЬ / КАЛИБРОВКА / СБРОС
+  // ------------------------------------------------------------
   function doZero() {
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/sensor/zero', true);
@@ -420,14 +493,20 @@
       } catch (e) {}
       refreshStatus();
     };
+    xhr.onerror = function() { showBanner('err', 'Ошибка сети при установке нуля'); };
     xhr.send();
   }
 
   function doCalib(thenZero) {
+    var dur = parseInt($('calibDurationSec').value, 10);
+    if (isNaN(dur) || dur < 5) dur = 5;
+    if (dur > 60) dur = 60;
+
     if (!confirm((thenZero
-        ? 'Запустить калибровку покоя + установить ноль?\n\n'
-        : 'Запустить калибровку покоя?\n\n')
-        + 'Не двигайте устройство ~2 секунды после подтверждения.')) return;
+            ? 'Калибровка покоя + установка нуля.\n\n'
+            : 'Калибровка покоя.\n\n')
+            + 'Длительность: ' + dur + ' сек.\n'
+            + 'Не двигайте устройство во время замера.')) return;
 
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/sensor/calib/start', true);
@@ -436,13 +515,17 @@
       try {
         var j = JSON.parse(xhr.responseText);
         if (j && j.ok) {
-          showBanner('info', 'Калибровка… не двигайте устройство 2 сек');
+          showBanner('info', 'Калибровка ' + dur + ' сек… не двигайте прибор');
           if (j.calib) renderCalib(j.calib);
+        } else if (j && j.calib && j.calib.status === 'error_sensor_stopped') {
+          showBanner('err', 'Камера остановлена — запустите сенсор.');
+          return;
         }
       } catch (e) {}
       pollCalib();
     };
-    xhr.send(JSON.stringify({thenZero: !!thenZero}));
+    xhr.onerror = function() { showBanner('err', 'Ошибка сети при калибровке'); };
+    xhr.send(JSON.stringify({thenZero: !!thenZero, durationSec: dur}));
   }
 
   function pollCalib() {
@@ -456,20 +539,23 @@
           var j = JSON.parse(xhr.responseText);
           if (j && j.calib) renderCalib(j.calib);
           var st = j && j.calib && j.calib.status;
-          if (st === 'done' || st === 'aborted_motion' || st === 'error_too_few') {
+          if (st === 'done' || st === 'aborted_motion'
+                  || st === 'error_too_few' || st === 'error_sensor_stopped') {
             clearInterval(calibPollTimer);
             calibPollTimer = null;
             if (st === 'done') {
-              showBanner('ok', 'Калибровка завершена. Ноль установлен.');
+              showBanner('ok', 'Калибровка завершена.');
               setTimeout(function(){ showBanner(null, ''); }, 3500);
               refreshStatus();
             } else if (st === 'aborted_motion') {
               showBanner('err', 'Калибровка прервана: было движение. Повторите.');
+            } else if (st === 'error_sensor_stopped') {
+              showBanner('err', 'Камера остановлена — запустите сенсор.');
             } else {
               showBanner('err', 'Калибровка не удалась: мало сэмплов.');
             }
           }
-          if (Date.now() - startTime > 15000) {
+          if (Date.now() - startTime > 70000) {
             clearInterval(calibPollTimer);
             calibPollTimer = null;
           }
@@ -480,23 +566,26 @@
   }
 
   function doResetPos() {
-    if (!confirm('Сбросить накопленную позицию и точку отсчёта?')) return;
+    if (!confirm('Сбросить накопленную позицию, поворот и след?')) return;
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/sensor/reset', true);
     xhr.onload = function() {
-      try {
-        var j = JSON.parse(xhr.responseText);
-        if (j && j.ok) {
-          showBanner('ok', 'Позиция сброшена');
-          setTimeout(function(){ showBanner(null, ''); }, 2500);
-          if (j.position) renderPosition(j.position);
-        }
-      } catch (e) {}
+      // мгновенно обнуляем UI — не ждём refreshStatus
+      $('posX').textContent    = '0.00';
+      $('posY').textContent    = '0.00';
+      $('posDist').textContent = '0.00';
+      $('posDir').textContent  = '—';
+      showBanner('ok', 'Позиция сброшена');
+      setTimeout(function(){ showBanner(null, ''); }, 2500);
       refreshStatus();
     };
+    xhr.onerror = function() { showBanner('err', 'Ошибка сети при сбросе'); };
     xhr.send();
   }
 
+  // ------------------------------------------------------------
+  // Экспорт
+  // ------------------------------------------------------------
   window.doStart        = doStart;
   window.doStop         = doStop;
   window.setFlash       = setFlash;
@@ -505,6 +594,9 @@
   window.doResetPos     = doResetPos;
   window.copyConnectUrl = copyConnectUrl;
 
+  // ------------------------------------------------------------
+  // MJPEG с fallback на JPEG-опрос
+  // ------------------------------------------------------------
   (function setupCameraPreview() {
     var img  = $('camStream');
     var hint = $('camHint');
@@ -526,6 +618,11 @@
       }
     }, 3000);
   })();
+
+  // Пользователь вручную меняет duration → не перезаписывать из конфига
+  $('calibDurationSec').addEventListener('input', function() {
+    this.dataset.touched = '1';
+  });
 
   refreshStatus();
   setInterval(refreshStatus, 2000);

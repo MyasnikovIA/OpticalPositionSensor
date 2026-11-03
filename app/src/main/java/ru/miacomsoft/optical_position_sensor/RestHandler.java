@@ -141,6 +141,27 @@ public class RestHandler implements HttpHandler {
                 return;
             }
 
+            if ("/api/sensor/calib/start".equals(path) && "POST".equals(method)) {
+                String body = HttpUtil.readBody(ex, 4096);
+                boolean thenZero  = false;
+                int     durationS = svc.getConfig().calibDurationSec;
+                try {
+                    if (!body.isEmpty()) {
+                        JSONObject req = new JSONObject(body);
+                        thenZero = req.optBoolean("thenZero", false);
+                        if (req.has("durationSec")) {
+                            durationS = req.optInt("durationSec", durationS);
+                        }
+                    }
+                } catch (Exception ignored) {}
+                svc.startCalibStatic(thenZero, durationS);
+                JSONObject o = new JSONObject();
+                o.put("ok", true);
+                o.put("calib", svc.calibStatusJson());
+                HttpUtil.sendJson(ex, 200, o.toString());
+                return;
+            }
+
             // ---------- конфиг ----------
             if ("/api/sensor/config".equals(path)) {
                 if (!HttpUtil.checkBasic(ex, svc.getConfig())) {

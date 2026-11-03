@@ -53,6 +53,7 @@
 </header>
 <main>
 
+    <!-- ============== Авторизация ============== -->
     <div class="card">
         <h2>Авторизация</h2>
         <label>Логин</label><input id="user" value="admin">
@@ -60,12 +61,14 @@
         <div class="hint">По умолчанию: admin / admin</div>
     </div>
 
+    <!-- ============== Основное ============== -->
     <div class="card">
         <h2>Основное</h2>
         <label class="inline"><input type="checkbox" id="enabled"> Датчик включён</label>
         <label class="inline"><input type="checkbox" id="autoStart"> Запускать автоматически при старте</label>
     </div>
 
+    <!-- ============== Серверы ============== -->
     <div class="card">
         <h2>Серверы (принимать подключения)</h2>
         <div class="row">
@@ -83,6 +86,7 @@
         <div class="hint">Изменение WS / Telnet портов применяется после полного перезапуска приложения.</div>
     </div>
 
+    <!-- ============== Клиентский режим ============== -->
     <div class="card">
         <h2>Клиентский режим (отправка данных на сервер)</h2>
         <label class="inline"><input type="checkbox" id="clientEnabled"> Включить отправку на удалённый сервер</label>
@@ -98,6 +102,7 @@
         <label>Интервал отправки, мс</label><input id="clientIntervalMs" type="number" min="10" max="60000">
     </div>
 
+    <!-- ============== Фонарик ============== -->
     <div class="card">
         <h2>Фонарик</h2>
         <label>Режим фонарика</label>
@@ -138,6 +143,7 @@
         </div>
     </div>
 
+    <!-- ============== Превью с камеры ============== -->
     <div class="card">
         <h2>Превью с камеры (MJPEG)</h2>
         <label class="inline"><input type="checkbox" id="cameraPreviewEnabled">
@@ -189,6 +195,7 @@
         </div>
     </div>
 
+    <!-- ============== Ориентация осей ============== -->
     <div class="card">
         <h2>Ориентация осей</h2>
         <div class="hint" style="margin-bottom:8px">
@@ -211,6 +218,7 @@
         </div>
     </div>
 
+    <!-- ============== Публикация JSON ============== -->
     <div class="card">
         <h2>Публикация JSON</h2>
         <label class="inline"><input type="checkbox" id="publishOnlyOnChange">
@@ -229,6 +237,7 @@
         </div>
     </div>
 
+    <!-- ============== Стабилизация нуля ============== -->
     <div class="card">
         <h2>Стабилизация нуля (калибровка покоя)</h2>
         <div class="row">
@@ -237,10 +246,12 @@
             <div><label>posBiasY (вычитается из dy)</label>
                 <input id="posBiasY" type="number" step="0.001" min="-10" max="10"></div>
         </div>
-        <label>posDeadbandPx — порог «шум/движение» (0.05–2.0 px/кадр)</label>
+        <label>posDeadbandPx — порог «шум/движение» (0.05–3.0 px/кадр)</label>
         <input id="posDeadbandPx" type="number" step="0.01" min="0" max="10">
         <label>rotDeadbandDeg — порог «шум/движение» для поворота (°/кадр)</label>
         <input id="rotDeadbandDeg" type="number" step="0.05" min="0" max="5">
+        <label>calibDurationSec — длительность калибровки, сек (5–60)</label>
+        <input id="calibDurationSec" type="number" min="5" max="60" step="1">
         <label class="inline"><input type="checkbox" id="posCalibrated">
             Калибровка применена</label>
         <div class="hint">
@@ -249,12 +260,15 @@
             Ручная правка нужна только для тонкой подстройки.<br>
             <b>Если позиция уплывает</b> — уменьшите posDeadbandPx (например, до 0.10)
             или повторите калибровку. <b>Если медленное движение не улавливается</b> —
-            тоже уменьшите posDeadbandPx.
+            тоже уменьшите posDeadbandPx.<br>
+            <b>calibDurationSec</b> — сколько секунд замерять шум покоя. Дольше = точнее
+            (до 60 сек). Минимум 5 сек.
         </div>
         <div class="status" id="calibNow">—</div>
-        <button class="orange" onclick="calibFromConfig()">⏱ Перезапустить калибровку (2 сек)</button>
+        <button class="orange" onclick="calibFromConfig()">⏱ Перезапустить калибровку</button>
     </div>
 
+    <!-- ============== Параметры optical flow ============== -->
     <div class="card">
         <h2>Параметры оптического потока</h2>
         <div class="row">
@@ -276,6 +290,7 @@
         </div>
     </div>
 
+    <!-- ============== Шумоподавление ============== -->
     <div class="card">
         <h2>Шумоподавление Optical Flow</h2>
         <div class="row">
@@ -303,6 +318,7 @@
         </div>
     </div>
 
+    <!-- ============== Смена логина/пароля ============== -->
     <div class="card">
         <h2>Сменить доступ к настройкам</h2>
         <label>Новый логин</label>
@@ -312,6 +328,7 @@
         <div class="hint">После смены перелогиньтесь на этой странице.</div>
     </div>
 
+    <!-- ============== Кнопки и вывод ============== -->
     <div class="card">
         <button onclick="loadCfg()">Загрузить</button>
         <button class="green" onclick="saveCfg()">Сохранить</button>
@@ -449,7 +466,7 @@
      'publishRotationThresholdDeg', 'publishHeartbeatMs',
      'targetWidth', 'searchRadius', 'blockSize', 'maxSadPx',
      'flowMinVariance', 'flowMinGradient', 'flowTemporalAlpha', 'flowMaxMotionPx',
-     'posBiasX', 'posBiasY', 'posDeadbandPx', 'rotDeadbandDeg',
+     'posBiasX', 'posBiasY', 'posDeadbandPx', 'rotDeadbandDeg', 'calibDurationSec',
      'trackerContrast', 'outputContrast']
       .forEach(function(k) {
         if (k in c) { var el = $(k); if (el) el.value = c[k]; }
@@ -514,6 +531,7 @@
       posBiasY: parseFloat($('posBiasY').value)||0,
       posDeadbandPx: parseFloat($('posDeadbandPx').value)||0,
       rotDeadbandDeg: parseFloat($('rotDeadbandDeg').value),
+      calibDurationSec: parseInt($('calibDurationSec').value, 10) || 5,
       posCalibrated: $('posCalibrated').checked,
       trackerContrast: parseInt($('trackerContrast').value,10)||100,
       outputContrast: parseInt($('outputContrast').value,10)||100
@@ -542,7 +560,6 @@
       try {
         var j = JSON.parse(xhr.responseText);
         applyForm(j.config);
-        // заполнить список камер из того же ответа
         populateCameras(j.cameraList || [], j.config.cameraId);
         window.__prevCameraId = j.config.cameraId;
 
@@ -559,7 +576,8 @@
         $('calibNow').innerHTML =
             'bias X = ' + (c.posBiasX||0).toFixed(3)
             + ', bias Y = ' + (c.posBiasY||0).toFixed(3)
-            + ', deadband = ' + (c.posDeadbandPx||0).toFixed(3) + ' px '
+            + ', deadband = ' + (c.posDeadbandPx||0).toFixed(3) + ' px, '
+            + 'duration = ' + (c.calibDurationSec||5) + ' сек '
             + (c.posCalibrated ? ' ✓' : ' —');
       } catch (e) {
         $('out').textContent = 'Ошибка разбора JSON: ' + e.message;
@@ -613,37 +631,53 @@
   }
 
   // ------------------------------------------------------------
-  // Калибровка покоя
+  // Калибровка из конфига (с явной длительностью)
   // ------------------------------------------------------------
   function calibFromConfig() {
-    if (!confirm('Запустить калибровку покоя? Не двигайте устройство 2 секунды.')) return;
+    var dur = parseInt($('calibDurationSec').value, 10);
+    if (isNaN(dur) || dur < 5) dur = 5;
+    if (dur > 60) dur = 60;
+
+    if (!confirm('Запустить калибровку покоя на ' + dur
+            + ' сек? Не двигайте устройство.')) return;
+
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/sensor/calib/start', true);
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.onload = function() {
-      $('out').textContent = 'Калибровка запущена. Ожидайте 2 сек…';
+      $('out').textContent = 'Калибровка ' + dur + ' сек…';
       var timer = setInterval(function() {
         var g = new XMLHttpRequest();
         g.open('GET', '/api/sensor/calib/status', true);
         g.onload = function() {
           try {
             var j = JSON.parse(g.responseText);
-            if (j && j.calib && j.calib.status === 'done') {
+            if (!j || !j.calib) return;
+            if (j.calib.status === 'done') {
               clearInterval(timer);
               $('out').textContent = 'Калибровка завершена. Загружаю конфиг…';
               loadCfg();
-            } else if (j && j.calib
-                    && (j.calib.status === 'aborted_motion'
-                        || j.calib.status === 'error_too_few')) {
+            } else if (j.calib.status === 'aborted_motion'
+                    || j.calib.status === 'error_too_few'
+                    || j.calib.status === 'error_sensor_stopped') {
               clearInterval(timer);
               $('out').textContent = 'Калибровка не удалась: ' + j.calib.status;
+            } else {
+              var pct = Math.round(100 * (j.calib.progress || 0));
+              $('out').textContent = 'Калибровка: ' + pct + '%'
+                      + (j.calib.remainSec
+                          ? ' (осталось ~' + j.calib.remainSec.toFixed(1) + ' с)'
+                          : '');
             }
           } catch (e) {}
         };
         g.send();
       }, 300);
     };
-    xhr.send('{}');
+    xhr.onerror = function() {
+      $('out').textContent = 'Ошибка сети при калибровке';
+    };
+    xhr.send(JSON.stringify({thenZero: false, durationSec: dur}));
   }
 
   // ------------------------------------------------------------

@@ -15,6 +15,8 @@ public class SensorConfig {
     public double  rotDeadbandDeg     = 0.5;      // °/кадр — ниже этого поворот считается шумом
 
     public int     cameraId            = -1;
+    // ---- Калибровка покоя ----
+    public int     calibDurationSec    = 5;      // секунд замера, минимум 5, максимум 60
 
     public boolean enabled            = true;
     public boolean autoStart          = true;
@@ -121,6 +123,7 @@ public class SensorConfig {
         c.cameraPreviewHeight = cameraPreviewHeight;
         c.rotDeadbandDeg      = rotDeadbandDeg;
         c.cameraId            = cameraId;
+        c.calibDurationSec    = calibDurationSec;
         return c;
     }
 
@@ -183,6 +186,7 @@ public class SensorConfig {
         c.cameraPreviewHeight = s.optInt    ("cameraPreviewHeight", c.cameraPreviewHeight);
         c.rotDeadbandDeg      = s.optDouble ("rotDeadbandDeg",      c.rotDeadbandDeg);
         c.cameraId            = s.optInt    ("cameraId",            c.cameraId);
+        c.calibDurationSec    = s.optInt    ("calibDurationSec",    c.calibDurationSec);
         return c;
     }
 
@@ -246,6 +250,7 @@ public class SensorConfig {
         s.put("cameraPreviewHeight", cameraPreviewHeight);
         s.put("rotDeadbandDeg",       rotDeadbandDeg);
         s.put("cameraId",             cameraId);
+        s.put("calibDurationSec",     calibDurationSec);
         root.put("sensor", s);
         return root;
     }
@@ -316,9 +321,12 @@ public class SensorConfig {
         cameraPreviewHeight = p.optInt    ("cameraPreviewHeight", cameraPreviewHeight);
         rotDeadbandDeg      = p.optDouble ("rotDeadbandDeg", rotDeadbandDeg);
         cameraId            = p.optInt    ("cameraId",              cameraId);
+        calibDurationSec    = p.optInt    ("calibDurationSec", calibDurationSec);
         if (rotDeadbandDeg < 0)   rotDeadbandDeg = 0;
         if (rotDeadbandDeg > 30)  rotDeadbandDeg = 30;
 // Clamp
+        if (calibDurationSec < 5)  calibDurationSec = 5;
+        if (calibDurationSec > 60) calibDurationSec = 60;
         if (posDeadbandPx < 0)     posDeadbandPx = 0;
         if (posDeadbandPx > 10)    posDeadbandPx = 10;
         if (trackerContrast < 50)  trackerContrast = 50;
