@@ -17,14 +17,13 @@
   .card{background:#182028;border-radius:8px;padding:12px;margin-bottom:12px}
   .card h2{font-size:14px;margin:0 0 10px;color:#adf}
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-  .kv{background:#0e1418;border-radius:6px;padding:8px;min-width:110px}
+  .kv{background:#0e1418;border-radius:6px;padding:8px;min-width:100px}
   .k{color:#8aa;font-size:11px;text-transform:uppercase}
   .v{font-size:16px;color:#6cf}
   .v.small{font-size:13px;color:#adf}
   button{background:#248;color:#fff;border:0;border-radius:6px;padding:8px 14px;
          cursor:pointer;font-family:monospace;font-size:13px;margin-right:6px}
   button:active{background:#369}
-  button.orange{background:#a63}
   button.red{background:#833}
   .hint{color:#8aa;font-size:11px;margin-top:6px;line-height:1.6}
   .hint code{color:#adf;background:#0e1418;padding:1px 4px;border-radius:3px}
@@ -38,15 +37,13 @@
             font-size:12px;color:#8aa}
   .controls label{display:flex;align-items:center;gap:4px;color:#e6f0f4}
   .controls input[type=range]{width:130px}
-  .controls select{background:#0e1418;color:#e6f0f4;border:1px solid #234;
-                   border-radius:4px;padding:4px 6px;font-family:monospace;font-size:12px}
   .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:#8aa;margin-top:8px}
   .legend .sw{display:inline-block;width:14px;height:14px;vertical-align:-2px;
               border-radius:2px;margin-right:4px}
-  .conn{font-size:11px;margin-left:8px}
-  .conn.on{color:#3c6}
-  .conn.off{color:#f88}
-  .conn.pending{color:#fc8}
+  .conn{font-size:11px;padding:4px 10px;border-radius:10px;background:#0e1418;display:inline-block}
+  .conn.on{color:#3c6;border:1px solid #3c6}
+  .conn.off{color:#f88;border:1px solid #f88}
+  .conn.pending{color:#fc8;border:1px solid #fc8}
 </style>
 </head>
 <body>
@@ -73,19 +70,16 @@
             <div class="kv"><div class="k">deadband, px</div><div class="v small" id="stDb">—</div></div>
             <div class="kv"><div class="k">точек следа</div><div class="v small" id="stTrail">—</div></div>
             <div class="kv"><div class="k">калибровка</div><div class="v small" id="stCal">—</div></div>
+            <div class="kv"><div class="k">дельт (SSE)</div><div class="v small" id="stDeltas">0</div></div>
+            <div class="kv"><div class="k">причина</div><div class="v small" id="stReason">—</div></div>
         </div>
 
         <canvas id="mapCanvas" width="800" height="500"></canvas>
 
         <div class="controls">
-            <label>Протокол:
-                <select id="protocolSelect">
-                    <option value="ajax">Ajax polling (250 мс)</option>
-                    <option value="sse">SSE (Server-Sent Events)</option>
-                    <option value="ws">WebSocket</option>
-                </select>
-            </label>
-            <span id="connStatus" class="conn pending">подключение…</span>
+            <span id="connStatus" class="conn pending">инициализация…</span>
+            <button onclick="forceFullRefresh()">⟳ Полный refetch</button>
+            <label><input type="checkbox" id="invertRotation"> Инвертировать поворот</label>
         </div>
 
         <div class="controls">
@@ -105,18 +99,21 @@
             <span><span class="sw" style="background:#3c6"></span>прибор (вершина = «вперёд»)</span>
             <span><span class="sw" style="background:#6cf"></span>след движения</span>
             <span><span class="sw" style="background:#484"></span>ноль (0, 0)</span>
-            <span>↑ север («вперёд») · → восток («вправо»)</span>
+            <span>↑ «вперёд» · → «вправо»</span>
         </div>
 
         <div class="hint">
-            Колесо мыши — zoom к курсору. Перетаскивание — панорама.<br>
-            <b>Оси:</b> «вперёд» — вверх, «вправо» — вправо. Если фактическое поведение
-            отличается — проверьте в Настройках <code>cameraMountRotationDeg</code> и
-            <code>invertDx/invertDy</code>: клиент мапит серверные <code>posX/posY</code>
-            на оси карты один к одному.<br>
-            <b>Протоколы:</b> Ajax — polling по таймеру. SSE и WebSocket — подписка на
-            поток, при каждом событии клиент запрашивает <code>/api/sensor/map</code>
-            (rate-limit 80 мс). Выбор запоминается в localStorage.
+            <b>Транспорт:</b> первый запрос — <code>GET /api/sensor/map</code> (полный снапшот
+            с трейлом). Дальше — только <code>event: reading</code> из SSE, по одному событию
+            на каждое изменение положения. Пока прибор неподвижен, данные <b>не идут</b>
+            (только <code>event: ping</code> ~50 байт каждые 15 с). При разрыве SSE —
+            авто-reconnect + refetch. Если SSE не поднялся за 3 попытки — fallback
+            на Ajax-polling каждые 500 мс.<br>
+            <b>Оси:</b> «вперёд» — вверх, «вправо» — вправо. Если направление всё ещё
+            неверное — проверьте в Настройках <code>cameraMountRotationDeg</code>,
+            <code>invertDx</code>, <code>invertDy</code>.<br>
+            <b>Поворот:</b> если треугольник вращается не в ту сторону — поставьте
+            галочку «Инвертировать поворот».
         </div>
     </div>
 
@@ -128,7 +125,7 @@
   var ctx = canvas.getContext('2d');
 
   // ============================================================
-  // View state (мировые координаты карты)
+  // View state
   // ============================================================
   var view = {
     offsetX: 0, offsetY: 0,
@@ -136,35 +133,32 @@
     autoFit: true
   };
 
-  var mapState = null;   // последний ответ /api/sensor/map
-  var trail = [];        // точки {x, y, rot, t} — серверные координаты
+  var mapState = null;   // {x_px, y_px, rotation_deg, deadband_px, calibrated, ...}
+  var trail = [];        // [{x, y, rot, t}] — координаты ОТНОСИТЕЛЬНО НУЛЯ
+  var MAX_TRAIL = 2000;
+  var TRAIL_MIN_DIST = 0.3;
+  var TRAIL_MIN_ROT  = 0.2;
 
   // ============================================================
-  // КЛЮЧЕВОЕ: преобразование серверных (posX, posY) → карта (mapX, mapY)
+  // ОСИ: серверные posX/posY → мировые mapX/mapY
   //
-  // Сервер:
-  //   posX = движение «вперёд(+)/назад(−)» в системе устройства
-  //   posY = движение «вправо(+)/влево(−)» в системе устройства
+  // Из наблюдений на устройстве:
+  //   posX > 0  когда прибор двигают ВЛЕВО
+  //   posY > 0  когда прибор двигают НАЗАД (к себе)
   //
-  // На карте:
-  //   +mapX = вправо
-  //   +mapY = вверх
-  //
-  // Отсюда:
-  //   mapX = +posY   (вправо → вправо)
-  //   mapY = -posX   (вперёд(posX отрицательный) → mapY>0 → вверх)
+  // Хотим стандарт: «вперёд» = вверх (mapY+), «вправо» = вправо (mapX+):
+  //   mapX = -posX
+  //   mapY = -posY
   // ============================================================
   function serverToMap(posX, posY) {
-    return { x: posY, y: -posX };
+    return { x: -posX, y: -posY };
   }
-
   function trailPointToMap(tp) {
-    // tp = { x: posX_rel_zero, y: posY_rel_zero, rot, t }
-    return { x: tp.y, y: -tp.x, rot: tp.rot || 0, t: tp.t };
+    return { x: -tp.x, y: -tp.y, rot: tp.rot || 0, t: tp.t };
   }
 
   // ============================================================
-  // Мировые координаты → canvas (с флипом Y — «вверх» = вверх)
+  // World → Screen (с флипом Y — «вверх» на экране = «вверх» в мире)
   // ============================================================
   function cssW() { return canvas.getBoundingClientRect().width;  }
   function cssH() { return canvas.getBoundingClientRect().height; }
@@ -343,6 +337,7 @@
     var m = serverToMap(mapState.x_px || 0, mapState.y_px || 0);
     var p = worldToScreen(m.x, m.y);
     var rot = mapState.rotation_deg || 0;
+    if ($('invertRotation').checked) rot = -rot;
 
     // rot = 0 → «вперёд» = вверх (в canvas -90°)
     var tip = (-90 + rot) * Math.PI / 180;
@@ -390,7 +385,7 @@
   }
 
   // ============================================================
-  // Панорама мышью / тач
+  // Панорама / zoom
   // ============================================================
   var drag = null;
   canvas.addEventListener('mousedown', function(e){
@@ -443,7 +438,7 @@
   }, {passive:false});
 
   // ============================================================
-  // Управление
+  // Кнопки
   // ============================================================
   function resetView() {
     view.autoFit = true;
@@ -461,191 +456,278 @@
     if (!confirm('Сбросить позицию, поворот и след?')) return;
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/sensor/reset', true);
-    xhr.onload = function() { poll(); };
+    xhr.onload = function() {
+      trail = [];
+      fetchFullSnapshot();
+    };
     xhr.send();
   }
-
-  // ============================================================
-  // Загрузка /api/sensor/map
-  // ============================================================
-  function applyMapResponse(st) {
-    mapState = st;
-    trail = (st.trail && st.trail.length > 0) ? st.trail.slice() : [];
-    $('stX').textContent      = (st.x_px || 0).toFixed(2);
-    $('stY').textContent      = (st.y_px || 0).toFixed(2);
-    $('stRot').textContent    = (st.rotation_deg || 0).toFixed(1);
-    $('stDb').textContent     = (st.deadband_px || 0).toFixed(3);
-    $('stTrail').textContent  = (st.trail_count || 0);
-    $('stCal').textContent    = st.calibrated ? '✓' : '—';
-    render();
+  function forceFullRefresh() {
+    fetchFullSnapshot();
   }
 
-  var lastMapOk = null;
-  function showBanner(kind, text) {
+  // ============================================================
+  // Загрузка
+  // ============================================================
+  var readyForDeltas = false;
+  var pendingReadings = [];
+
+  var deltasReceived = 0;
+  var fullFetches    = 0;
+  var lastEventMs    = 0;
+  var lastZeroAt     = -1;
+  var lastPublishReason = '';
+
+  function showBanner(text) {
     var b = $('banner');
     if (!text) { b.style.display = 'none'; return; }
     b.style.display = '';
-    b.className = 'warn';
     b.textContent = text;
   }
 
-  function poll() {
+  function fetchFullSnapshot(callback) {
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '/api/sensor/map', true);
-    xhr.timeout = 3000;
+    xhr.timeout = 5000;
     xhr.onload = function() {
       if (xhr.status === 200) {
-        lastMapOk = true;
-        showBanner(null, '');
-        try { applyMapResponse(JSON.parse(xhr.responseText)); } catch (e) {}
+        try {
+          var st = JSON.parse(xhr.responseText);
+          mapState = st;
+          trail = (st.trail && st.trail.length > 0) ? st.trail.slice() : [];
+          lastZeroAt = st.zero_set_at_ms || 0;
+          fullFetches++;
+          readyForDeltas = true;
+          showBanner(null);
+          // применяем накопленные дельты, пришедшие до получения снапшота
+          while (pendingReadings.length) {
+            applyReading(pendingReadings.shift());
+          }
+          updateCounters();
+          render();
+          if (callback) callback(true);
+          return;
+        } catch (e) {
+          showBanner('Ошибка разбора /map: ' + e.message);
+        }
       } else if (xhr.status === 404) {
-        lastMapOk = false;
-        showBanner('err',
-            'GET /api/sensor/map → 404. Пересоберите APK ' +
-            '(Build → Clean → Rebuild) — на сервере нет эндпоинта /map ' +
-            'или не исправлен findHandler в HttpServer.java.');
+        showBanner('GET /api/sensor/map → 404. Пересоберите APK ' +
+                   '(Clean + Rebuild) — на сервере нет эндпоинта /map ' +
+                   'или не исправлен findHandler() в HttpServer.java.');
       } else {
-        lastMapOk = false;
-        showBanner('err', 'GET /api/sensor/map → HTTP ' + xhr.status);
+        showBanner('GET /api/sensor/map → HTTP ' + xhr.status);
       }
+      if (callback) callback(false);
     };
     xhr.onerror = function() {
-      lastMapOk = false;
-      showBanner('err', 'Сервер не отвечает');
+      showBanner('/api/sensor/map: сервер не отвечает');
+      if (callback) callback(false);
     };
     xhr.ontimeout = function() {
-      lastMapOk = false;
-      showBanner('err', 'Таймаут запроса /api/sensor/map');
+      showBanner('/api/sensor/map: таймаут');
+      if (callback) callback(false);
     };
     xhr.send();
   }
 
   // ============================================================
-  // ПРОТОКОЛЫ: Ajax / SSE / WebSocket
+  // SSE: приём дельт
   // ============================================================
-  var protocol    = 'ajax';
-  var ajaxTimer   = null;
-  var sseSource   = null;
-  var wsConn      = null;
-  var lastFetch   = 0;
-  var MIN_MAP_INTERVAL = 80;  // rate-limit для SSE/WS
+  var sseConn      = null;
+  var sseState     = 'idle';   // idle | connecting | open | error | fallback
+  var sseAttempts  = 0;
+  var sseConnectTimer = null;
 
-  function setConnStatus(kind, text) {
-    var el = $('connStatus');
-    el.className = 'conn ' + kind;
-    el.textContent = text;
-  }
+  function applyReading(reading) {
+    if (!reading || !reading.position) return;
 
-  function stopAllTransports() {
-    if (ajaxTimer)  { clearInterval(ajaxTimer);  ajaxTimer  = null; }
-    if (sseSource)  { try { sseSource.close(); } catch (e) {} sseSource = null; }
-    if (wsConn)     { try { wsConn.close();    } catch (e) {} wsConn    = null; }
-  }
+    var pos = reading.position;
+    var zeroAt = pos.zero_set_at_ms || 0;
 
-  function startAjax() {
-    setConnStatus('pending', 'ajax: запуск…');
-    poll();
-    ajaxTimer = setInterval(function() {
-      poll();
-      setConnStatus(lastMapOk ? 'on' : 'off',
-              lastMapOk ? 'ajax: OK' : 'ajax: ошибка');
-    }, 250);
-  }
-
-  function startSse() {
-    setConnStatus('pending', 'sse: подключение…');
-    try {
-      var es = new EventSource('/api/sensor/sse');
-      sseSource = es;
-      es.onopen = function() {
-        setConnStatus('on', 'sse: подключено');
-        poll();
-      };
-      es.addEventListener('reading', function() {
-        var now = Date.now();
-        if (now - lastFetch < MIN_MAP_INTERVAL) return;
-        lastFetch = now;
-        poll();
-      });
-      es.onerror = function() {
-        setConnStatus('off', 'sse: ошибка (авто-реконнект)');
-      };
-    } catch (e) {
-      setConnStatus('off', 'sse: не поддерживается');
-      setProtocol('ajax');
+    // Ноль сменился → старые точки трейла стали «смещены» — синхронизируемся
+    if (lastZeroAt >= 0 && zeroAt !== lastZeroAt) {
+      lastZeroAt = zeroAt;
+      fetchFullSnapshot();
+      return;
     }
+    lastZeroAt = zeroAt;
+
+    if (!mapState) mapState = { calibrated: false, deadband_px: 0 };
+    mapState.x_px = pos.x_px;
+    mapState.y_px = pos.y_px;
+    mapState.rotation_deg = (reading.shift && reading.shift.total_rotation_deg) || 0;
+
+    appendToTrail(pos.x_px, pos.y_px, mapState.rotation_deg,
+                  reading.timestamp_ms || Date.now());
+
+    lastEventMs = Date.now();
+    deltasReceived++;
+    lastPublishReason = reading.publish_reason || '';
+    updateCounters();
+    render();
   }
 
-  function startWs() {
-    setConnStatus('pending', 'ws: получение порта…');
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', '/api/sensor/status', true);
-    xhr.onload = function() {
-      if (xhr.status !== 200) {
-        setConnStatus('off', 'ws: статус-сервер недоступен');
-        setProtocol('ajax');
-        return;
+  function appendToTrail(x, y, rot, t) {
+    var last = trail[trail.length - 1];
+    if (last) {
+      var dx = x - last.x;
+      var dy = y - last.y;
+      var dr = Math.abs(((rot - last.rot + 540) % 360) - 180);
+      if (Math.hypot(dx, dy) < TRAIL_MIN_DIST && dr < TRAIL_MIN_ROT) return;
+    }
+    trail.push({ x: x, y: y, rot: rot, t: t });
+    while (trail.length > MAX_TRAIL) trail.shift();
+  }
+
+  function connectSse() {
+    if (sseConn) { try { sseConn.close(); } catch (e) {} sseConn = null; }
+    sseState = 'connecting';
+    updateStatus();
+
+    if (sseConnectTimer) { clearTimeout(sseConnectTimer); sseConnectTimer = null; }
+
+    var es;
+    try { es = new EventSource('/api/sensor/sse'); }
+    catch (e) {
+      sseState = 'error';
+      updateStatus();
+      startFallbackPolling();
+      return;
+    }
+    sseConn = es;
+
+    // если 6 сек не пришло onopen → fallback
+    sseConnectTimer = setTimeout(function() {
+      if (sseState !== 'open') {
+        try { es.close(); } catch (e) {}
+        sseState = 'error';
+        updateStatus();
+        startFallbackPolling();
       }
+    }, 6000);
+
+    es.onopen = function() {
+      sseState = 'open';
+      sseAttempts = 0;
+      if (sseConnectTimer) { clearTimeout(sseConnectTimer); sseConnectTimer = null; }
+      updateStatus();
+      if (!readyForDeltas) fetchFullSnapshot();
+    };
+
+    es.addEventListener('ready', function() {
+      lastEventMs = Date.now();
+      updateStatus();
+    });
+
+    es.addEventListener('ping', function() {
+      // heartbeat — просто обновляем «последний раз слышали сервер»
+      lastEventMs = Date.now();
+      updateStatus();
+    });
+
+    es.addEventListener('reading', function(ev) {
       try {
-        var st = JSON.parse(xhr.responseText);
-        var wsPort = st.wsPort;
-        if (!wsPort || wsPort < 1) {
-          setConnStatus('off', 'ws: отключён в настройках');
-          setProtocol('ajax');
+        var reading = JSON.parse(ev.data);
+        if (!readyForDeltas) {
+          pendingReadings.push(reading);
+          if (pendingReadings.length > 500) pendingReadings.shift();
           return;
         }
-        var url = 'ws://' + location.hostname + ':' + wsPort + '/';
-        setConnStatus('pending', 'ws: подключение к ' + wsPort + '…');
-        var ws = new WebSocket(url);
-        wsConn = ws;
-        ws.onopen = function() {
-          setConnStatus('on', 'ws: подключено');
-          poll();
-        };
-        ws.onmessage = function() {
-          var now = Date.now();
-          if (now - lastFetch < MIN_MAP_INTERVAL) return;
-          lastFetch = now;
-          poll();
-        };
-        ws.onclose = function() {
-          setConnStatus('off', 'ws: отключено (переподключение через 3 с)');
-          if (protocol === 'ws') {
-            setTimeout(function() { if (protocol === 'ws') startWs(); }, 3000);
-          }
-        };
-        ws.onerror = function() {
-          setConnStatus('off', 'ws: ошибка соединения');
-        };
-      } catch (e) {
-        setConnStatus('off', 'ws: ошибка разбора статуса');
-        setProtocol('ajax');
+        applyReading(reading);
+      } catch (e) {}
+    });
+
+    es.onerror = function() {
+      sseState = 'error';
+      sseAttempts++;
+      updateStatus();
+      if (sseAttempts >= 3 && !readyForDeltas) {
+        startFallbackPolling();
       }
     };
-    xhr.onerror = function() {
-      setConnStatus('off', 'ws: сеть недоступна');
-      setProtocol('ajax');
-    };
-    xhr.send();
-  }
-
-  function setProtocol(p) {
-    protocol = p;
-    try { localStorage.setItem('map_protocol', p); } catch (e) {}
-    $('protocolSelect').value = p;
-    stopAllTransports();
-    lastFetch = 0;
-    if (p === 'ajax') startAjax();
-    else if (p === 'sse') startSse();
-    else if (p === 'ws') startWs();
   }
 
   // ============================================================
-  // UI event handlers
+  // Fallback: Ajax-polling (только если SSE не поднялся)
   // ============================================================
-  $('protocolSelect').addEventListener('change', function(){
-    setProtocol(this.value);
-  });
+  var fallbackTimer = null;
+  function startFallbackPolling() {
+    if (fallbackTimer) return;
+    if (sseConn) { try { sseConn.close(); } catch (e) {} sseConn = null; }
+    sseState = 'fallback';
+    updateStatus();
+    fallbackTimer = setInterval(function() {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/sensor/map', true);
+      xhr.timeout = 3000;
+      xhr.onload = function() {
+        if (xhr.status !== 200) return;
+        try {
+          var st = JSON.parse(xhr.responseText);
+          mapState = st;
+          trail = (st.trail && st.trail.length > 0) ? st.trail.slice() : [];
+          lastZeroAt = st.zero_set_at_ms || 0;
+          readyForDeltas = true;
+          lastEventMs = Date.now();
+          updateCounters();
+          render();
+        } catch (e) {}
+      };
+      xhr.send();
+    }, 500);
+  }
+
+  // ============================================================
+  // UI
+  // ============================================================
+  function updateStatus() {
+    var el = $('connStatus');
+    var now = Date.now();
+    var txt, cls;
+
+    if (sseState === 'open') {
+      cls = 'on';
+      var ago = lastEventMs ? (now - lastEventMs) / 1000 : -1;
+      if (ago < 0)         txt = 'SSE: активно';
+      else if (ago < 2)    txt = 'SSE: активно • только что';
+      else if (ago < 15)   txt = 'SSE: активно • ' + ago.toFixed(1) + ' с назад';
+      else                 txt = 'SSE: активно • тишина ' + ago.toFixed(0) + ' с (нет движения)';
+      txt += ' • дельт: ' + deltasReceived;
+    } else if (sseState === 'connecting') {
+      cls = 'pending';
+      txt = 'SSE: подключение…';
+    } else if (sseState === 'error') {
+      cls = 'off';
+      txt = 'SSE: ошибка, реконнект (' + sseAttempts + ')';
+    } else if (sseState === 'fallback') {
+      cls = 'pending';
+      txt = 'Ajax fallback (500 мс)';
+    } else {
+      cls = 'pending';
+      txt = 'инициализация…';
+    }
+    el.className = 'conn ' + cls;
+    el.textContent = txt;
+  }
+
+  function updateCounters() {
+    if (!mapState) return;
+    $('stX').textContent      = (mapState.x_px || 0).toFixed(2);
+    $('stY').textContent      = (mapState.y_px || 0).toFixed(2);
+    $('stRot').textContent    = (mapState.rotation_deg || 0).toFixed(1);
+    $('stDb').textContent     = (mapState.deadband_px || 0).toFixed(3);
+    $('stTrail').textContent  = trail.length;
+    $('stCal').textContent    = mapState.calibrated ? '✓' : '—';
+    $('stDeltas').textContent = deltasReceived;
+    $('stReason').textContent = lastPublishReason || '—';
+  }
+
+  // обновлять статус «N с назад» каждую секунду
+  setInterval(updateStatus, 1000);
+
+  // ============================================================
+  // UI handlers
+  // ============================================================
   $('zoomSlider').addEventListener('input', function(){
     view.scale = parseFloat(this.value);
     view.autoFit = false;
@@ -655,10 +737,12 @@
   $('showTrail').addEventListener('change', render);
   $('showGrid').addEventListener('change', render);
   $('showAxes').addEventListener('change', render);
+  $('invertRotation').addEventListener('change', render);
 
-  window.resetView      = resetView;
-  window.centerOnDevice = centerOnDevice;
-  window.doResetPos     = doResetPos;
+  window.resetView        = resetView;
+  window.centerOnDevice   = centerOnDevice;
+  window.doResetPos       = doResetPos;
+  window.forceFullRefresh = forceFullRefresh;
 
   window.addEventListener('resize', resizeCanvas);
 
@@ -666,11 +750,8 @@
   // Start
   // ============================================================
   resizeCanvas();
-
-  // восстановить выбор протокола
-  var saved = null;
-  try { saved = localStorage.getItem('map_protocol'); } catch (e) {}
-  setProtocol(saved === 'sse' || saved === 'ws' ? saved : 'ajax');
+  fetchFullSnapshot();
+  connectSse();
 })();
 </script>
 </body>
