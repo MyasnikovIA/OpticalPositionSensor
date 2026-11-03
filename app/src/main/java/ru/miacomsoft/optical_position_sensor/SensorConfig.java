@@ -14,6 +14,8 @@ public class SensorConfig {
     public int     cameraPreviewRotation   = 90;   // 0|90|180|270 (по часовой)
     public double  rotDeadbandDeg     = 0.5;      // °/кадр — ниже этого поворот считается шумом
 
+    public int     cameraId            = -1;
+
     public boolean enabled            = true;
     public boolean autoStart          = true;
 
@@ -118,6 +120,7 @@ public class SensorConfig {
         c.cameraPreviewWidth  = cameraPreviewWidth;
         c.cameraPreviewHeight = cameraPreviewHeight;
         c.rotDeadbandDeg      = rotDeadbandDeg;
+        c.cameraId            = cameraId;
         return c;
     }
 
@@ -179,6 +182,7 @@ public class SensorConfig {
         c.cameraPreviewWidth  = s.optInt    ("cameraPreviewWidth",  c.cameraPreviewWidth);
         c.cameraPreviewHeight = s.optInt    ("cameraPreviewHeight", c.cameraPreviewHeight);
         c.rotDeadbandDeg      = s.optDouble ("rotDeadbandDeg",      c.rotDeadbandDeg);
+        c.cameraId            = s.optInt    ("cameraId",            c.cameraId);
         return c;
     }
 
@@ -241,6 +245,7 @@ public class SensorConfig {
         s.put("cameraPreviewWidth",  cameraPreviewWidth);
         s.put("cameraPreviewHeight", cameraPreviewHeight);
         s.put("rotDeadbandDeg",       rotDeadbandDeg);
+        s.put("cameraId",             cameraId);
         root.put("sensor", s);
         return root;
     }
@@ -309,7 +314,8 @@ public class SensorConfig {
         outputContrast      = p.optInt    ("outputContrast",      outputContrast);
         cameraPreviewWidth  = p.optInt    ("cameraPreviewWidth",  cameraPreviewWidth);
         cameraPreviewHeight = p.optInt    ("cameraPreviewHeight", cameraPreviewHeight);
-        rotDeadbandDeg = p.optDouble ("rotDeadbandDeg", rotDeadbandDeg);
+        rotDeadbandDeg      = p.optDouble ("rotDeadbandDeg", rotDeadbandDeg);
+        cameraId            = p.optInt    ("cameraId",              cameraId);
         if (rotDeadbandDeg < 0)   rotDeadbandDeg = 0;
         if (rotDeadbandDeg > 30)  rotDeadbandDeg = 30;
 // Clamp
@@ -319,6 +325,8 @@ public class SensorConfig {
         if (trackerContrast > 300) trackerContrast = 300;
         if (outputContrast < 50)   outputContrast = 50;
         if (outputContrast > 300)  outputContrast = 300;
+        if (cameraId < -1) cameraId = -1;
+        if (cameraId > 16) cameraId = 16;  // страховка: реально не больше ~4
 
         String u    = p.optString("configUser", "");
         String pass = p.optString("configPass", "");

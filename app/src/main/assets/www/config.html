@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Настройки — OpticalPositionSensor</title>
+    <link rel="icon" href="data:,">
     <style>
   body{margin:0;background:#101418;color:#e6f0f4;font:14px/1.4 monospace;padding:0}
   header{background:#182028;padding:10px 14px;display:flex;justify-content:space-between;
@@ -44,10 +45,10 @@
 <header>
     <h1>Настройки</h1>
     <nav>
-        <a href="index.html" class="active">Информация</a>
+        <a href="index.html">Информация</a>
         <a href="sensor.html">Live</a>
         <a href="map.html">Карта</a>
-        <a href="config.html">Настройки</a>
+        <a href="config.html" class="active">Настройки</a>
     </nav>
 </header>
 <main>
@@ -108,6 +109,33 @@
         <label>Порог освещённости для авто, lx</label>
         <input id="lightThreshold" type="number" min="0" max="10000">
         <div class="hint">Фонарик включается через режим TORCH камеры. На некоторых прошивках не поддерживается.</div>
+    </div>
+
+    <!-- ============== Камера (выбор) ============== -->
+    <div class="card">
+        <h2>Камера</h2>
+        <div class="row">
+            <div style="flex:2">
+                <label>Выбор камеры</label>
+                <select id="cameraId">
+                    <option value="-1">По умолчанию (Camera.open())</option>
+                </select>
+            </div>
+            <div style="flex:1">
+                <label>&nbsp;</label>
+                <button onclick="loadCameraList()">Обновить список</button>
+            </div>
+        </div>
+        <div class="hint">
+            Показывает все камеры, установленные в системе (включая внешние,
+            если прошивка их видит). <b>Смена камеры перезапускает сенсор</b> —
+            это занимает 1–2 секунды, Live-поток на мгновение прервётся.<br>
+            Значение <code>-1</code> = «по умолчанию»: стандартное поведение
+            Android (обычно задняя камера). Выбор сохраняется в конфиге и
+            восстанавливается после перезагрузки.<br>
+            Смена разрешения камеры (в карточке ниже) тоже требует перезапуска
+            сенсора — оно применится автоматически при сохранении конфига.
+        </div>
     </div>
 
     <div class="card">
@@ -178,7 +206,8 @@
         <label class="inline"><input type="checkbox" id="invertDy"> Инвертировать Y</label>
         <div class="hint">
             Применяется к dx_px, dy_px, distance_px, direction_deg в JSON.
-            Ноль ставится на странице <a href="sensor.html">Live</a>.
+            Ноль ставится на странице <a href="sensor.html">Live</a>,
+            визуализация — на <a href="map.html">Карте</a>.
         </div>
     </div>
 
@@ -210,6 +239,8 @@
         </div>
         <label>posDeadbandPx — порог «шум/движение» (0.05–2.0 px/кадр)</label>
         <input id="posDeadbandPx" type="number" step="0.01" min="0" max="10">
+        <label>rotDeadbandDeg — порог «шум/движение» для поворота (°/кадр)</label>
+        <input id="rotDeadbandDeg" type="number" step="0.05" min="0" max="5">
         <label class="inline"><input type="checkbox" id="posCalibrated">
             Калибровка применена</label>
         <div class="hint">
@@ -227,15 +258,22 @@
     <div class="card">
         <h2>Параметры оптического потока</h2>
         <div class="row">
-            <div><label>targetWidth, px</label><input id="targetWidth" type="number" min="32" max="512"></div>
-            <div><label>searchRadius, px</label><input id="searchRadius" type="number" min="1" max="16"></div>
-            <div><label>blockSize, px</label><input id="blockSize" type="number" min="4" max="32"></div>
+            <div><label>targetWidth, px</label>
+                <input id="targetWidth" type="number" min="32" max="512"></div>
+            <div><label>searchRadius, px (поворот: ≥6)</label>
+                <input id="searchRadius" type="number" min="1" max="12"></div>
+            <div><label>blockSize, px</label>
+                <input id="blockSize" type="number" min="4" max="32"></div>
         </div>
         <div class="row">
-            <div><label>maxSadPx (порог SAD на пиксель)</label>
-                <input id="maxSadPx" type="number" min="1" max="255"></div>
+            <div><label>maxSadPx (поворот: ≥25)</label>
+                <input id="maxSadPx" type="number" min="5" max="60"></div>
         </div>
-        <div class="hint">Изменение параметров применяется при следующем запуске камеры (Стоп → Старт).</div>
+        <div class="hint">
+            Изменение этих параметров применяется при следующем запуске камеры (Стоп → Старт).<br>
+            <b>Поворот:</b> searchRadius ≥ 6 и maxSadPx ≥ 25 нужны, чтобы краевые блоки
+            при вращении попадали в SAD-поиск.
+        </div>
     </div>
 
     <div class="card">
@@ -289,6 +327,9 @@
 
   var cameraSizesLoaded = false;
 
+  // ------------------------------------------------------------
+  // Разрешения камеры
+  // ------------------------------------------------------------
   function populateCameraSizes(sizes, cfgW, cfgH) {
     var sel = $('cameraPreviewSize');
     sel.innerHTML = '<option value="0x0">Авто (самое низкое)</option>';
@@ -333,6 +374,64 @@
     xhr.send();
   }
 
+  // ------------------------------------------------------------
+  // Список камер (ВЫБОР)
+  // ------------------------------------------------------------
+  function populateCameras(list, cfgId) {
+    var sel = $('cameraId');
+    if (!sel) return;
+
+    sel.innerHTML = '<option value="-1">По умолчанию (Camera.open())</option>';
+
+    if (list && list.length) {
+      for (var i = 0; i < list.length; i++) {
+        var c = list[i];
+        var opt = document.createElement('option');
+        opt.value = String(c.id);
+        opt.textContent = (c.label || ('Camera ' + c.id))
+                + (c.facing ? ' — ' + c.facing : '');
+        if (typeof cfgId === 'number' && c.id === cfgId) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    }
+
+    if (typeof cfgId === 'number' && cfgId >= 0) {
+      var found = false;
+      for (var j = 0; j < sel.options.length; j++) {
+        if (sel.options[j].value === String(cfgId)) { found = true; break; }
+      }
+      if (!found) {
+        var o = document.createElement('option');
+        o.value = String(cfgId);
+        o.textContent = 'Camera ' + cfgId + ' (нет в списке)';
+        o.selected = true;
+        sel.appendChild(o);
+      }
+    }
+    if (typeof cfgId === 'number' && cfgId === -1) sel.value = '-1';
+  }
+
+  function loadCameraList() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/sensor/config', true);
+    xhr.setRequestHeader('Authorization', basicAuth());
+    xhr.onload = function() {
+      if (xhr.status !== 200) return;
+      try {
+        var j = JSON.parse(xhr.responseText);
+        var curId = (j.config && typeof j.config.cameraId === 'number')
+                ? j.config.cameraId
+                : parseInt($('cameraId').value, 10);
+        if (isNaN(curId)) curId = -1;
+        populateCameras(j.cameraList || [], curId);
+      } catch (e) {}
+    };
+    xhr.send();
+  }
+
+  // ------------------------------------------------------------
+  // Применение конфига к форме
+  // ------------------------------------------------------------
   function applyForm(c) {
     ['enabled', 'autoStart', 'restEnabled', 'sseEnabled', 'wsEnabled',
      'telnetEnabled', 'clientEnabled', 'cameraPreviewEnabled',
@@ -350,13 +449,19 @@
      'publishRotationThresholdDeg', 'publishHeartbeatMs',
      'targetWidth', 'searchRadius', 'blockSize', 'maxSadPx',
      'flowMinVariance', 'flowMinGradient', 'flowTemporalAlpha', 'flowMaxMotionPx',
-     'posBiasX', 'posBiasY', 'posDeadbandPx',
+     'posBiasX', 'posBiasY', 'posDeadbandPx', 'rotDeadbandDeg',
      'trackerContrast', 'outputContrast']
       .forEach(function(k) {
         if (k in c) { var el = $(k); if (el) el.value = c[k]; }
       });
 
-    // Разрешение
+    // выбор камеры — отдельно (это <select>, нужно строковое значение)
+    if ('cameraId' in c) {
+      var sel = $('cameraId');
+      if (sel) sel.value = String(c.cameraId);
+    }
+
+    // Разрешение камеры
     var w = (c.cameraPreviewWidth || 0);
     var h = (c.cameraPreviewHeight || 0);
     populateCameraSizes([], w, h);
@@ -381,6 +486,7 @@
       clientIntervalMs: parseInt($('clientIntervalMs').value,10)||100,
       flashlightMode: $('flashlightMode').value,
       lightThreshold: parseInt($('lightThreshold').value,10)||50,
+      cameraId: parseInt($('cameraId').value, 10),
       cameraPreviewEnabled: $('cameraPreviewEnabled').checked,
       cameraPreviewFps: parseInt($('cameraPreviewFps').value,10)||5,
       cameraPreviewQuality: parseInt($('cameraPreviewQuality').value,10)||50,
@@ -394,9 +500,9 @@
       publishRotationThresholdDeg: parseFloat($('publishRotationThresholdDeg').value)||0.2,
       publishHeartbeatMs: parseInt($('publishHeartbeatMs').value,10)||0,
       targetWidth: parseInt($('targetWidth').value,10)||112,
-      searchRadius: parseInt($('searchRadius').value,10)||4,
+      searchRadius: parseInt($('searchRadius').value,10)||6,
       blockSize: parseInt($('blockSize').value,10)||8,
-      maxSadPx: parseInt($('maxSadPx').value,10)||18,
+      maxSadPx: parseInt($('maxSadPx').value,10)||25,
       flowMinVariance: parseInt($('flowMinVariance').value,10),
       flowMinGradient: parseInt($('flowMinGradient').value,10),
       flowSubpixel: $('flowSubpixel').checked,
@@ -407,18 +513,25 @@
       posBiasX: parseFloat($('posBiasX').value)||0,
       posBiasY: parseFloat($('posBiasY').value)||0,
       posDeadbandPx: parseFloat($('posDeadbandPx').value)||0,
+      rotDeadbandDeg: parseFloat($('rotDeadbandDeg').value),
       posCalibrated: $('posCalibrated').checked,
       trackerContrast: parseInt($('trackerContrast').value,10)||100,
       outputContrast: parseInt($('outputContrast').value,10)||100
     };
+
     if (isNaN(payload.flowMinVariance)) payload.flowMinVariance = 400;
     if (isNaN(payload.flowMinGradient)) payload.flowMinGradient = 120;
+    if (isNaN(payload.rotDeadbandDeg))  payload.rotDeadbandDeg  = 0.1;
+    if (isNaN(payload.cameraId))        payload.cameraId        = -1;
 
     var httpPort = parseInt($('httpPort').value, 10);
     if (httpPort > 0) payload.httpPort = httpPort;
     return payload;
   }
 
+  // ------------------------------------------------------------
+  // Загрузка конфига
+  // ------------------------------------------------------------
   function loadCfg() {
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '/api/sensor/config', true);
@@ -429,6 +542,10 @@
       try {
         var j = JSON.parse(xhr.responseText);
         applyForm(j.config);
+        // заполнить список камер из того же ответа
+        populateCameras(j.cameraList || [], j.config.cameraId);
+        window.__prevCameraId = j.config.cameraId;
+
         if (typeof j.httpPortActive === 'number') {
           $('portInfo').innerHTML =
               'Сервер сейчас работает на порту <b>' + j.httpPortActive + '</b>.'
@@ -452,6 +569,9 @@
     xhr.send();
   }
 
+  // ------------------------------------------------------------
+  // Сохранение конфига
+  // ------------------------------------------------------------
   function saveCfg() {
     var payload = readForm();
     var nu = $('newUser').value; if (nu) payload.configUser = nu;
@@ -469,7 +589,17 @@
       try {
         var j = JSON.parse(xhr.responseText);
         applyForm(j.config);
-        $('out').textContent = 'Сохранено.\n\n' + JSON.stringify(j.config, null, 2);
+        populateCameras(j.cameraList || [], j.config.cameraId);
+
+        var txt = 'Сохранено.\n\n' + JSON.stringify(j.config, null, 2);
+        var prevCam = window.__prevCameraId;
+        if (typeof prevCam === 'number' && j.config.cameraId !== prevCam) {
+          txt += '\n\n📷 Камера изменена (' + prevCam + ' → ' + j.config.cameraId
+               + '). Сенсор перезапущен на сервере — обновите Live.';
+        }
+        window.__prevCameraId = j.config.cameraId;
+
+        $('out').textContent = txt;
         $('newUser').value = ''; $('newPass').value = '';
         if (nu) $('user').value = nu;
         if (np) $('pass').value = np;
@@ -482,6 +612,9 @@
     xhr.send(JSON.stringify(payload));
   }
 
+  // ------------------------------------------------------------
+  // Калибровка покоя
+  // ------------------------------------------------------------
   function calibFromConfig() {
     if (!confirm('Запустить калибровку покоя? Не двигайте устройство 2 секунды.')) return;
     var xhr = new XMLHttpRequest();
@@ -513,6 +646,9 @@
     xhr.send('{}');
   }
 
+  // ------------------------------------------------------------
+  // Перезапуск камеры
+  // ------------------------------------------------------------
   function restartSensor() {
     var x1 = new XMLHttpRequest();
     x1.open('POST', '/api/sensor/stop', true);
@@ -528,6 +664,9 @@
     x1.send();
   }
 
+  // ------------------------------------------------------------
+  // Применить HTTP-порт и перезапустить сервер
+  // ------------------------------------------------------------
   function applyHttpPort() {
     var newPort = parseInt($('httpPort').value, 10);
     if (!newPort || newPort < 1 || newPort > 65535) {
@@ -576,6 +715,7 @@
   window.restartSensor = restartSensor;
   window.applyHttpPort = applyHttpPort;
   window.loadCameraSizes = loadCameraSizes;
+  window.loadCameraList = loadCameraList;
   window.calibFromConfig = calibFromConfig;
 
   loadCfg();

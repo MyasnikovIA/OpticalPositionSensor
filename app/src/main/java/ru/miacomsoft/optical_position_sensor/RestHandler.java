@@ -154,6 +154,7 @@ public class RestHandler implements HttpHandler {
                     o.put("ok", true);
                     o.put("config", svc.getConfig().toPublicJson());
                     o.put("httpPortActive", SensorService.getCurrentHttpPort());
+                    o.put("cameraList", svc.getCameraList());
                     HttpUtil.sendJson(ex, 200, o.toString());
                     return;
                 }
@@ -168,6 +169,7 @@ public class RestHandler implements HttpHandler {
                     o.put("ok", true);
                     o.put("config", svc.getConfig().toPublicJson());
                     o.put("httpPortActive", SensorService.getCurrentHttpPort());
+                    o.put("cameraList", svc.getCameraList());
                     if (newHttpPort != oldHttpPort) {
                         o.put("portChanged", true);
                         o.put("oldPort", oldHttpPort);

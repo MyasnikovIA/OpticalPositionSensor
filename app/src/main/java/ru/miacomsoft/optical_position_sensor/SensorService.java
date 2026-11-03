@@ -407,6 +407,10 @@ public class SensorService extends Service {
     public SnapshotProvider getSnapshotProvider() { return snapshotProvider; }
 
     public synchronized void patchConfig(JSONObject patch) {
+        int oldCameraId = config.cameraId;
+        int oldPreviewW = config.cameraPreviewWidth;
+        int oldPreviewH = config.cameraPreviewHeight;
+
         config.applyPatch(patch);
         try { ConfigStore.save(getApplicationContext(), config); }
         catch (Exception e) { Log.w(TAG, "config save", e); }
@@ -421,6 +425,19 @@ public class SensorService extends Service {
                 || patch.has("clientServerUrl") || patch.has("clientPath")
                 || patch.has("clientToken") || patch.has("clientIntervalMs")) {
             restartClient();
+        }
+
+        // === Смена камеры или её разрешения требует перезапуска сенсора ===
+        boolean camChanged = (config.cameraId != oldCameraId);
+        boolean sizeChanged = (config.cameraPreviewWidth != oldPreviewW
+                || config.cameraPreviewHeight != oldPreviewH);
+        if ((camChanged || sizeChanged) && sensorRunning) {
+            Log.i(TAG, "Restart sensor: cameraId " + oldCameraId + " → "
+                    + config.cameraId + ", previewSize "
+                    + oldPreviewW + "x" + oldPreviewH + " → "
+                    + config.cameraPreviewWidth + "x" + config.cameraPreviewHeight);
+            stopSensorOnly();
+            startSensorOnly();
         }
     }
 
@@ -688,10 +705,28 @@ public class SensorService extends Service {
             dummyTexture = null;
         }
 
+        final int wantedId = config.cameraId;
+        int totalCameras = 0;
+        try { totalCameras = android.hardware.Camera.getNumberOfCameras(); }
+        catch (Throwable ignored) {}
+
+        // Валидация: если явный id вне диапазона — откатываемся на default
+        int useId = wantedId;
+        if (useId >= 0 && (totalCameras == 0 || useId >= totalCameras)) {
+            Log.w(TAG, "cameraId=" + useId + " out of range (have " + totalCameras
+                    + "), falling back to default");
+            useId = -1;
+        }
+
         for (int attempt = 1; attempt <= 3; attempt++) {
-            Log.i(TAG, "Camera.open() attempt " + attempt + "/3");
+            Log.i(TAG, "Camera.open() attempt " + attempt + "/3, cameraId="
+                    + (useId >= 0 ? String.valueOf(useId) : "default"));
             try {
-                camera = Camera.open();
+                if (useId >= 0) {
+                    camera = android.hardware.Camera.open(useId);
+                } else {
+                    camera = android.hardware.Camera.open();
+                }
                 if (camera == null) { sleepMs(400); continue; }
                 if (!configureCamera()) {
                     try { camera.release(); } catch (Exception ignored) {}
@@ -720,7 +755,8 @@ public class SensorService extends Service {
                     continue;
                 }
                 Log.i(TAG, "Camera opened on attempt " + attempt
-                        + ": " + previewWidth + "x" + previewHeight);
+                        + ": cameraId=" + (useId >= 0 ? useId : "default")
+                        + " " + previewWidth + "x" + previewHeight);
                 return true;
             } catch (RuntimeException e) {
                 Log.e(TAG, "Camera.open() attempt " + attempt + " failed", e);
@@ -1302,6 +1338,8 @@ public class SensorService extends Service {
             o.put("cameraPreviewWidth",  config.cameraPreviewWidth);
             o.put("cameraPreviewHeight", config.cameraPreviewHeight);
             o.put("cameraSizes",         getCameraSizes());
+            o.put("cameraId",              config.cameraId);
+            o.put("cameraList",            getCameraList());
             boolean hasFrame;
             synchronized (snapshotLock) { hasFrame = (fullFrame != null); }
             o.put("hasFrame", hasFrame);
@@ -1316,13 +1354,14 @@ public class SensorService extends Service {
     private String buildStatusLine() {
         String ip = HttpUtil.getLocalIp(getApplicationContext());
         String base = "http://" + ip + ":" + sCurrentHttpPort + "/";
+        String cam = "cam " + (config.cameraId >= 0 ? String.valueOf(config.cameraId) : "default");
         if (sensorRunning) {
-            return base + "  ·  " + previewWidth + "x" + previewHeight;
+            return base + "  ·  " + previewWidth + "x" + previewHeight + "  ·  " + cam;
         }
         if (!lastCameraError.isEmpty()) {
-            return base + "  ·  камера: ошибка";
+            return base + "  ·  камера: ошибка (" + cam + ")";
         }
-        return base + "  ·  камера остановлена";
+        return base + "  ·  камера остановлена (" + cam + ")";
     }
 
     // ==============================================================
@@ -1384,5 +1423,35 @@ public class SensorService extends Service {
         NotificationManager nm =
                 (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) nm.notify(NOTIF_ID, buildNotification(text));
+    }
+    /** Список всех камер устройства: [{id, facing, orientation, label}]. */
+    public org.json.JSONArray getCameraList() {
+        org.json.JSONArray arr = new org.json.JSONArray();
+        try {
+            int n = android.hardware.Camera.getNumberOfCameras();
+            for (int i = 0; i < n; i++) {
+                android.hardware.Camera.CameraInfo info =
+                        new android.hardware.Camera.CameraInfo();
+                android.hardware.Camera.getCameraInfo(i, info);
+
+                String facing = "unknown";
+                if (info.facing == android.hardware.Camera.CameraInfo.CAMERA_FACING_BACK)
+                    facing = "back";
+                else if (info.facing == android.hardware.Camera.CameraInfo.CAMERA_FACING_FRONT)
+                    facing = "front";
+                else if (Build.VERSION.SDK_INT >= 23 && info.facing == 2)
+                    facing = "external";
+
+                JSONObject o = new JSONObject();
+                o.put("id", i);
+                o.put("facing", facing);
+                o.put("orientation", info.orientation);
+                o.put("label", "Camera " + i + " (" + facing + ", " + info.orientation + "°)");
+                arr.put(o);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "getCameraList: " + t.getMessage());
+        }
+        return arr;
     }
 }
