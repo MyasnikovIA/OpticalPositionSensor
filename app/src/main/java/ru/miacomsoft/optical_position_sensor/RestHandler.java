@@ -146,7 +146,23 @@ public class RestHandler implements HttpHandler {
                 HttpUtil.sendJson(ex, 200, ok.toString());
                 return;
             }
+            if ("/api/sensor/zero".equals(path) && "POST".equals(method)) {
+                svc.setZero();
+                JSONObject o = new JSONObject();
+                o.put("ok", true);
+                o.put("position", svc.positionJsonPublic());
+                HttpUtil.sendJson(ex, 200, o.toString());
+                return;
+            }
 
+            if ("/api/sensor/reset".equals(path) && "POST".equals(method)) {
+                svc.resetPosition();
+                JSONObject o = new JSONObject();
+                o.put("ok", true);
+                o.put("position", svc.positionJsonPublic());
+                HttpUtil.sendJson(ex, 200, o.toString());
+                return;
+            }
             HttpUtil.sendError(ex, 404, "Unknown: " + path);
         } catch (Exception e) {
             HttpUtil.sendError(ex, 500, e.getMessage());

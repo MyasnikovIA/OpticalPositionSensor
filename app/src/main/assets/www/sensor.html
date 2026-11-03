@@ -23,11 +23,14 @@
   .k{color:#8aa;font-size:11px;text-transform:uppercase}
   .v{font-size:18px;color:#6cf}
   .v.small{font-size:14px;color:#adf}
+  .v.big{font-size:26px;color:#6cf;font-weight:bold}
   button{background:#248;color:#fff;border:0;border-radius:6px;padding:8px 14px;
          cursor:pointer;font-family:monospace;font-size:13px;margin-right:6px}
   button:active{background:#369}
   button.green{background:#285}
+  button.orange{background:#a63}
   button.red{background:#833}
+  button.big{padding:14px 22px;font-size:15px;font-weight:bold}
   button:disabled{background:#333;color:#777;cursor:not-allowed;opacity:0.7}
   .pill{display:inline-block;padding:2px 8px;border-radius:10px;
         font-size:11px;font-weight:bold}
@@ -37,19 +40,23 @@
       border-radius:6px;font-size:11px;max-height:250px;overflow:auto}
   #statusLine{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
   #statusLine .lbl{color:#8aa;font-size:12px}
-
   #pubLine{color:#8aa;font-size:11px;margin-bottom:10px}
   #pubInfo{color:#adf}
-
   #connectUrl{font-size:18px;color:#6cf;word-break:break-all;user-select:all;
               padding:8px;background:#0e1418;border-radius:6px}
   #connectUrl.warn{color:#fa4;font-size:14px}
-
   #camWrap{background:#000;text-align:center;border-radius:6px;overflow:hidden}
   #camStream{width:100%;max-height:60vh;object-fit:contain;background:#000;
              display:block;margin:0 auto}
   #camHint{color:#8aa;font-size:11px;margin-top:6px}
   #copyStatus{color:#285;font-size:12px;margin-left:8px}
+  .hint{color:#8aa;font-size:11px;margin-top:6px;line-height:1.6}
+  .hint code{color:#adf;background:#0e1418;padding:1px 4px;border-radius:3px}
+  .posBox{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+  @media(min-width:520px){ .posBox{grid-template-columns:repeat(4,1fr)} }
+  .posItem{background:#0e1418;border-radius:8px;padding:10px;text-align:center}
+  .posItem .k{font-size:10px;color:#8aa;text-transform:uppercase;margin-bottom:4px}
+  .posItem .v{font-size:22px;color:#6cf;font-weight:bold}
 </style>
 </head>
 <body>
@@ -83,6 +90,35 @@
         </div>
     </div>
 
+    <!-- ================= ПОЗИЦИЯ И КАЛИБРОВКА ================= -->
+    <div class="card">
+        <h2>Позиция от нуля</h2>
+
+        <div class="posBox">
+            <div class="posItem"><div class="k">X, px</div><div class="v" id="posX">—</div></div>
+            <div class="posItem"><div class="k">Y, px</div><div class="v" id="posY">—</div></div>
+            <div class="posItem"><div class="k">dist, px</div><div class="v" id="posDist">—</div></div>
+            <div class="posItem"><div class="k">направление</div><div class="v" id="posDir">—</div></div>
+        </div>
+
+        <div style="margin-bottom:8px">
+            <button class="green big" onclick="doZero()">⦿ Установить ноль здесь</button>
+            <button class="orange big" onclick="doResetPos()">↺ Сбросить накопление</button>
+        </div>
+
+        <div class="hint">
+            <b>Установить ноль</b> — текущее физическое положение становится точкой (0,0).
+            Дальнейшие X/Y измеряются относительно неё.<br>
+            <b>Сбросить накопление</b> — обнуляет и накопленное смещение, и точку отсчёта
+            (лечит «уплывание» из-за накопления ошибок).<br>
+            Ноль сохраняется до остановки камеры. При «Стоп → Старт» сбрасывается.
+        </div>
+
+        <div class="hint" style="margin-top:8px">
+            API: <code>POST /api/sensor/zero</code> · <code>POST /api/sensor/reset</code>
+        </div>
+    </div>
+
     <!-- ================= ИЗОБРАЖЕНИЕ С КАМЕРЫ ================= -->
     <div class="card">
         <h2>Изображение с камеры</h2>
@@ -93,7 +129,8 @@
         </div>
         <div id="camHint">
             MJPEG: <code>/api/sensor/stream.mjpg</code> •
-            один кадр: <code>/api/sensor/snapshot.jpg</code>
+            один кадр: <code>/api/sensor/snapshot.jpg</code> •
+            фичи: <code>/api/sensor/debug.jpg</code>
         </div>
     </div>
 
@@ -113,9 +150,9 @@
         </div>
     </div>
 
-    <!-- ================= ДВИЖЕНИЕ ================= -->
+    <!-- ================= ДВИЖЕНИЕ (за кадр) ================= -->
     <div class="card">
-        <h2>Движение</h2>
+        <h2>Движение за кадр</h2>
         <div class="row">
             <div class="kv"><div class="k">dx, px</div><div class="v" id="dx">—</div></div>
             <div class="kv"><div class="k">dy, px</div><div class="v" id="dy">—</div></div>
@@ -156,9 +193,6 @@
   var es = null;
   var autoStarted = false;
 
-  // ------------------------------------------------------------
-  // Баннер
-  // ------------------------------------------------------------
   function showBanner(kind, text) {
     var b = $('banner');
     if (!text) { b.style.display = 'none'; return; }
@@ -167,9 +201,6 @@
     b.textContent = text;
   }
 
-  // ------------------------------------------------------------
-  // Копирование адреса подключения
-  // ------------------------------------------------------------
   function legacyCopy(text) {
     var tmp = document.createElement('textarea');
     tmp.value = text;
@@ -181,43 +212,31 @@
     document.body.removeChild(tmp);
     flashCopied();
   }
-
   function flashCopied() {
     var s = $('copyStatus');
     if (!s) return;
     s.textContent = 'скопировано';
     setTimeout(function() { s.textContent = ''; }, 2000);
   }
-
   function copyConnectUrl() {
     var el = $('connectUrl');
     if (!el) return;
     var text = el.textContent || el.innerText;
     if (!text || text === '—' || el.className.indexOf('warn') >= 0) return;
-
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(function() {
-        flashCopied();
-      }).catch(function() {
-        legacyCopy(text);
-      });
+      navigator.clipboard.writeText(text).then(flashCopied, function(){ legacyCopy(text); });
       return;
     }
     legacyCopy(text);
   }
 
   // ------------------------------------------------------------
-  // Состояние, значения
+  // Состояние, поля
   // ------------------------------------------------------------
   function setState(running) {
     var p = $('statePill');
-    if (running) {
-      p.className = 'pill on';
-      p.textContent = 'RUNNING';
-    } else {
-      p.className = 'pill off';
-      p.textContent = 'STOPPED';
-    }
+    if (running) { p.className = 'pill on';  p.textContent = 'RUNNING'; }
+    else         { p.className = 'pill off'; p.textContent = 'STOPPED'; }
     $('btnStart').disabled = !!running;
     $('btnStop').disabled  = !running;
   }
@@ -237,6 +256,16 @@
     $('flashDebug').textContent = JSON.stringify(f, null, 2);
   }
 
+  function renderPosition(p) {
+    if (!p) return;
+    if (typeof p.x_px === 'number') $('posX').textContent = p.x_px.toFixed(2);
+    if (typeof p.y_px === 'number') $('posY').textContent = p.y_px.toFixed(2);
+    if (typeof p.distance_from_zero_px === 'number')
+      $('posDist').textContent = p.distance_from_zero_px.toFixed(2);
+    if (typeof p.direction_from_zero_deg === 'number')
+      $('posDir').textContent = p.direction_from_zero_deg.toFixed(1) + '°';
+  }
+
   function renderReading(r) {
     if (!r) return;
     var s = r.shift || {};
@@ -250,6 +279,7 @@
     if (typeof r.proc_ms === 'number') $('proc').textContent = r.proc_ms.toFixed(2);
     if (r.frame) $('frameText').textContent = r.frame.width + '×' + r.frame.height;
     if (r.flashlight) updateFlashUi(r.flashlight);
+    if (r.position)   renderPosition(r.position);
     $('json').textContent = JSON.stringify(r, null, 2);
   }
 
@@ -263,9 +293,7 @@
       es.addEventListener('reading', function(e) {
         try { renderReading(JSON.parse(e.data)); } catch (x) {}
       });
-    } catch (e) {
-      setTimeout(connectSSE, 3000);
-    }
+    } catch (e) { setTimeout(connectSSE, 3000); }
   }
 
   // ------------------------------------------------------------
@@ -283,8 +311,8 @@
           $('frameText').textContent = st.previewWidth + '×' + st.previewHeight;
         }
         if (st.flashlight) updateFlashUi(st.flashlight);
+        if (st.position)   renderPosition(st.position);
 
-        // --- IP / порт / адрес подключения ---
         var ip = st.localIp || '—';
         var port = st.httpPortActive || st.httpPort || 8080;
         $('ipText').textContent   = ip;
@@ -299,7 +327,6 @@
           cu.className = 'warn';
         }
 
-        // --- Публикация ---
         var info = '';
         if (st.publishOnlyOnChange === false) {
           info = 'выключен (публикуется каждый кадр)';
@@ -319,7 +346,6 @@
         }
         $('pubInfo').textContent = info;
 
-        // --- Баннер ---
         if (!st.sensorRunning) {
           if (st.lastCameraError) {
             showBanner('err', 'Камера не запущена: ' + st.lastCameraError);
@@ -348,7 +374,6 @@
     xhr.onerror = function() { showBanner('err', 'Ошибка сети при запуске'); };
     xhr.send();
   }
-
   function doStop() {
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/sensor/stop', true);
@@ -356,27 +381,63 @@
     xhr.onerror = function() { showBanner('err', 'Ошибка сети при остановке'); };
     xhr.send();
   }
-
   function setFlash(mode) {
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/sensor/flashlight', true);
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.onload = function() {
+      try { updateFlashUi(JSON.parse(xhr.responseText)); } catch (e) {}
+      refreshStatus();
+    };
+    xhr.onerror = function() { $('flashDebug').textContent = 'network error'; };
+    xhr.send(JSON.stringify({mode: mode}));
+  }
+
+  // ------------------------------------------------------------
+  // НУЛЬ И СБРОС
+  // ------------------------------------------------------------
+  function doZero() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/zero', true);
+    xhr.onload = function() {
       try {
-        var f = JSON.parse(xhr.responseText);
-        updateFlashUi(f);
+        var j = JSON.parse(xhr.responseText);
+        if (j && j.ok) {
+          showBanner('info', 'Ноль установлен: X=0, Y=0');
+          setTimeout(function(){ showBanner(null, ''); }, 2500);
+          if (j.position) renderPosition(j.position);
+        }
       } catch (e) {}
       refreshStatus();
     };
-    xhr.onerror = function() {
-      $('flashDebug').textContent = 'network error';
+    xhr.onerror = function() { showBanner('err', 'Ошибка сети при установке нуля'); };
+    xhr.send();
+  }
+
+  function doResetPos() {
+    if (!confirm('Сбросить накопленную позицию и точку отсчёта?')) return;
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/reset', true);
+    xhr.onload = function() {
+      try {
+        var j = JSON.parse(xhr.responseText);
+        if (j && j.ok) {
+          showBanner('info', 'Позиция сброшена');
+          setTimeout(function(){ showBanner(null, ''); }, 2500);
+          if (j.position) renderPosition(j.position);
+        }
+      } catch (e) {}
+      refreshStatus();
     };
-    xhr.send(JSON.stringify({mode: mode}));
+    xhr.onerror = function() { showBanner('err', 'Ошибка сети при сбросе позиции'); };
+    xhr.send();
   }
 
   window.doStart        = doStart;
   window.doStop         = doStop;
   window.setFlash       = setFlash;
+  window.doZero         = doZero;
+  window.doResetPos     = doResetPos;
   window.copyConnectUrl = copyConnectUrl;
 
   // ------------------------------------------------------------
@@ -387,35 +448,23 @@
     var hint = $('camHint');
     var useMjpeg = true;
     var pollTimer = null;
-
     function startPoll() {
       if (pollTimer) return;
       hint.innerHTML = 'MJPEG недоступен, используется JPEG-опрос (4 fps)';
-      function tick() {
-        img.src = '/api/sensor/snapshot.jpg?t=' + new Date().getTime();
-      }
+      function tick() { img.src = '/api/sensor/snapshot.jpg?t=' + new Date().getTime(); }
       tick();
       pollTimer = setInterval(tick, 250);
     }
-
     img.onerror = function() {
-      if (useMjpeg) {
-        useMjpeg = false;
-        startPoll();
-      }
+      if (useMjpeg) { useMjpeg = false; startPoll(); }
     };
-
     setTimeout(function() {
       if (useMjpeg && (!img.naturalWidth || img.naturalWidth === 0)) {
-        useMjpeg = false;
-        startPoll();
+        useMjpeg = false; startPoll();
       }
     }, 3000);
   })();
 
-  // ------------------------------------------------------------
-  // Старт
-  // ------------------------------------------------------------
   refreshStatus();
   setInterval(refreshStatus, 2000);
   connectSSE();

@@ -29,21 +29,18 @@ public class SnapshotHandler implements HttpHandler {
         }
 
         String path = ex.getRequestURI().getPath();
-        if ("/api/sensor/snapshot.jpg".equals(path)) {
-            serveSingle(ex);
-            return;
-        }
-        if ("/api/sensor/stream.mjpg".equals(path)) {
-            serveStream(ex);
-            return;
-        }
+        if ("/api/sensor/snapshot.jpg".equals(path)) { serveSingle(ex, false); return; }
+        if ("/api/sensor/debug.jpg".equals(path))    { serveSingle(ex, true);  return; }
+        if ("/api/sensor/stream.mjpg".equals(path))  { serveStream(ex);       return; }
         HttpUtil.sendError(ex, 404, "Unknown: " + path);
     }
 
-    private void serveSingle(HttpExchange ex) throws IOException {
-        byte[] jpeg = provider.encodeOnce();
+    private void serveSingle(HttpExchange ex, boolean debug) throws IOException {
+        byte[] jpeg = debug ? provider.encodeDebug() : provider.encodeOnce();
         if (jpeg == null) {
-            HttpUtil.sendError(ex, 503, "No frame available (camera stopped?)");
+            HttpUtil.sendError(ex, 503, debug
+                    ? "No tracker state yet"
+                    : "No frame available (camera stopped?)");
             return;
         }
         HttpUtil.handleCors(ex);

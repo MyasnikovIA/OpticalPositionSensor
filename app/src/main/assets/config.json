@@ -37,6 +37,13 @@
     "cameraMountRotationDeg": 0,
     "invertDx": false,
     "invertDy": true,
+    "flowMinVariance": 400,
+    "flowMinGradient": 120,
+    "flowSubpixel": true,
+    "flowTemporalSmoothing": true,
+    "flowTemporalAlpha": 0.6,
+    "flowMaxMotionPx": 40.0,
+    "grayscaleOutput": true,
     "configUser": "admin",
     "configPass": "admin"
   }

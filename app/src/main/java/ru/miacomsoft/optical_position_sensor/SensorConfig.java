@@ -51,6 +51,17 @@ public class SensorConfig {
     public boolean invertDx               = false;
     public boolean invertDy               = true;  // «вперёд» = +Y для flat-phone
 
+    // ---- Шумоподавление Optical Flow ----
+    public int     flowMinVariance       = 400;
+    public int     flowMinGradient       = 120;
+    public boolean flowSubpixel          = true;
+    public boolean flowTemporalSmoothing = true;
+    public double  flowTemporalAlpha     = 0.6;
+    public double  flowMaxMotionPx       = 40.0;
+
+    // ---- Вывод ----
+    public boolean grayscaleOutput       = true;
+
     public String  configUser         = "admin";
     public String  configPass         = "admin";
 
@@ -127,6 +138,13 @@ public class SensorConfig {
         c.publishMotionThresholdPx    = s.optDouble ("publishMotionThresholdPx",    c.publishMotionThresholdPx);
         c.publishRotationThresholdDeg = s.optDouble ("publishRotationThresholdDeg", c.publishRotationThresholdDeg);
         c.publishHeartbeatMs          = s.optLong   ("publishHeartbeatMs",          c.publishHeartbeatMs);
+        c.flowMinVariance       = s.optInt    ("flowMinVariance",       c.flowMinVariance);
+        c.flowMinGradient       = s.optInt    ("flowMinGradient",       c.flowMinGradient);
+        c.flowSubpixel          = s.optBoolean("flowSubpixel",          c.flowSubpixel);
+        c.flowTemporalSmoothing = s.optBoolean("flowTemporalSmoothing", c.flowTemporalSmoothing);
+        c.flowTemporalAlpha     = s.optDouble ("flowTemporalAlpha",     c.flowTemporalAlpha);
+        c.flowMaxMotionPx       = s.optDouble ("flowMaxMotionPx",       c.flowMaxMotionPx);
+        c.grayscaleOutput       = s.optBoolean("grayscaleOutput",       c.grayscaleOutput);
         return c;
     }
 
@@ -173,6 +191,13 @@ public class SensorConfig {
         s.put("cameraMountRotationDeg", cameraMountRotationDeg);
         s.put("invertDx",               invertDx);
         s.put("invertDy",               invertDy);
+        s.put("flowMinVariance",       flowMinVariance);
+        s.put("flowMinGradient",       flowMinGradient);
+        s.put("flowSubpixel",          flowSubpixel);
+        s.put("flowTemporalSmoothing", flowTemporalSmoothing);
+        s.put("flowTemporalAlpha",     flowTemporalAlpha);
+        s.put("flowMaxMotionPx",       flowMaxMotionPx);
+        s.put("grayscaleOutput",       grayscaleOutput);
         root.put("sensor", s);
         return root;
     }
@@ -224,6 +249,14 @@ public class SensorConfig {
         publishMotionThresholdPx    = p.optDouble ("publishMotionThresholdPx",    publishMotionThresholdPx);
         publishRotationThresholdDeg = p.optDouble ("publishRotationThresholdDeg", publishRotationThresholdDeg);
         publishHeartbeatMs          = p.optLong   ("publishHeartbeatMs",          publishHeartbeatMs);
+
+        flowMinVariance       = p.optInt    ("flowMinVariance",       flowMinVariance);
+        flowMinGradient       = p.optInt    ("flowMinGradient",       flowMinGradient);
+        flowSubpixel          = p.optBoolean("flowSubpixel",          flowSubpixel);
+        flowTemporalSmoothing = p.optBoolean("flowTemporalSmoothing", flowTemporalSmoothing);
+        flowTemporalAlpha     = p.optDouble ("flowTemporalAlpha",     flowTemporalAlpha);
+        flowMaxMotionPx       = p.optDouble ("flowMaxMotionPx",       flowMaxMotionPx);
+        grayscaleOutput       = p.optBoolean("grayscaleOutput",       grayscaleOutput);
 
         String u    = p.optString("configUser", "");
         String pass = p.optString("configPass", "");

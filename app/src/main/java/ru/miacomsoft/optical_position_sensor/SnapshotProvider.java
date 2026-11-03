@@ -64,6 +64,7 @@ public class SnapshotProvider {
         lastJpeg = null;
         Log.i(TAG, "encoder stopped");
     }
+    public byte[] encodeDebug() { return svc.encodeDebugJpeg(); }
 
     private void loop() {
         final long interval = 1000L / fps;

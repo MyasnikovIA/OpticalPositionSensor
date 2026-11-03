@@ -93,6 +93,14 @@ public class SensorService extends Service {
     private long   lastPublishMs   = 0L;
     private String lastFlashState  = "";
     private long   skippedReadings = 0L;
+    private volatile OpticalFlowTracker.Result lastFlowResult;
+    private final Object flowResultLock = new Object();
+
+    private final Object positionLock = new Object();
+    private double posX = 0.0, posY = 0.0;
+    private double zeroX = 0.0, zeroY = 0.0;
+    private long   zeroSetAtMs = 0L;
+    private volatile boolean forcePublish = false;
 
     private final SimpleDateFormat iso = new SimpleDateFormat(
             "yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US);
@@ -167,6 +175,65 @@ public class SensorService extends Service {
 
     public SensorConfig getConfig() { return config; }
     public SensorBroadcaster getBroadcaster() { return broadcaster; }
+    /**
+     * Текущее положение становится точкой отсчёта (0,0).
+     * Публикуем принудительно, чтобы UI обновился даже без движения.
+     */
+    public synchronized void setZero() {
+        synchronized (positionLock) {
+            zeroX = posX;
+            zeroY = posY;
+            zeroSetAtMs = System.currentTimeMillis();
+        }
+        forcePublish = true;
+        Log.i(TAG, "Zero set at (" + zeroX + ", " + zeroY + ")");
+    }
+
+    /**
+     * Обнуляет и накопленную позицию, и точку отсчёта.
+     * Полезно при дрейфе (когда pos «уплыла» из-за накопления ошибок).
+     */
+    public synchronized void resetPosition() {
+        synchronized (positionLock) {
+            posX = 0.0; posY = 0.0;
+            zeroX = 0.0; zeroY = 0.0;
+            zeroSetAtMs = System.currentTimeMillis();
+        }
+        forcePublish = true;
+        Log.i(TAG, "Position reset");
+    }
+
+    private JSONObject positionJson() {
+        try {
+            double rx, ry, px, py, zx, zy;
+            long t;
+            synchronized (positionLock) {
+                rx = posX - zeroX;
+                ry = posY - zeroY;
+                px = posX; py = posY;
+                zx = zeroX; zy = zeroY;
+                t  = zeroSetAtMs;
+            }
+            JSONObject o = new JSONObject();
+            o.put("x_px", round(rx, 3));
+            o.put("y_px", round(ry, 3));
+            o.put("distance_from_zero_px", round(Math.hypot(rx, ry), 3));
+            o.put("direction_from_zero_deg",
+                    round(normalizeDeg(Math.toDegrees(Math.atan2(ry, rx))), 2));
+            o.put("pos_raw_x_px",  round(px, 3));
+            o.put("pos_raw_y_px",  round(py, 3));
+            o.put("zero_x_px",     round(zx, 3));
+            o.put("zero_y_px",     round(zy, 3));
+            o.put("zero_set_at_ms", t);
+            return o;
+        } catch (Exception e) {
+            return new JSONObject();
+        }
+    }
+
+    /** Для RestHandler: публичный доступ. */
+    public JSONObject positionJsonPublic() { return positionJson(); }
+
     public SnapshotProvider getSnapshotProvider() { return snapshotProvider; }
 
     public synchronized void patchConfig(JSONObject patch) {
@@ -307,8 +374,11 @@ public class SensorService extends Service {
     public synchronized void startSensorOnly() {
         if (sensorRunning) return;
 
-        tracker.configure(config.targetWidth, config.searchRadius,
-                config.blockSize, config.minContrast, config.maxSadPx);
+        tracker.configure(
+                config.targetWidth, config.searchRadius, config.blockSize,
+                config.flowMinVariance, config.flowMinGradient, config.maxSadPx,
+                config.flowSubpixel, config.flowTemporalSmoothing,
+                config.flowTemporalAlpha, config.flowMaxMotionPx);
 
         if (worker == null) {
             worker = new HandlerThread("SensorWorker");
@@ -346,7 +416,11 @@ public class SensorService extends Service {
 
     public synchronized void stopSensorOnly() {
         sensorRunning = false;
-
+        synchronized (positionLock) {
+            posX = 0.0; posY = 0.0;
+            zeroX = 0.0; zeroY = 0.0;
+            zeroSetAtMs = System.currentTimeMillis();
+        }
         if (flashlight != null) {
             try { flashlight.release(); } catch (Exception ignored) {}
             flashlight = null;
@@ -546,6 +620,12 @@ public class SensorService extends Service {
             System.arraycopy(fullFrame, 0, frameCopy, 0, fullFrame.length);
         }
 
+        // >>> grayscale: обнуляем хрому до нейтрального серого (V=U=128) <<<
+        if (config.grayscaleOutput) {
+            int ySize = w * h;
+            for (int i = ySize; i < frameCopy.length; i++) frameCopy[i] = (byte) 128;
+        }
+
         int rotation = config.cameraPreviewRotation;
         rotation = ((rotation % 360) + 360) % 360;
         if (rotation != 90 && rotation != 180 && rotation != 270) rotation = 0;
@@ -578,7 +658,58 @@ public class SensorService extends Service {
             return null;
         }
     }
+    /**
+     * Маленькая (gw × gh) grayscale-картинка с красными крестами на отобранных
+     * блоках optical flow. Апскейл — nearest-neighbor, чтобы не тратить CPU.
+     * Стоимость: O(gw*gh) + PNG 112×84 — единицы миллисекунд даже на SC8830.
+     */
+    public byte[] encodeDebugJpeg() {
+        OpticalFlowTracker.Result r;
+        synchronized (flowResultLock) { r = lastFlowResult; }
 
+        int gw = tracker.getGridWidth();
+        int gh = tracker.getGridHeight();
+        if (gw <= 0 || gh <= 0) return null;
+        byte[] prev = tracker.getPrevBuffer();
+        if (prev == null || prev.length != gw * gh) return null;
+
+        int[] pixels = new int[gw * gh];
+        for (int i = 0; i < gw * gh; i++) {
+            int v = prev[i] & 0xFF;
+            pixels[i] = 0xFF000000 | (v << 16) | (v << 8) | v;
+        }
+
+        if (r != null && r.featureXs != null) {
+            for (int i = 0; i < r.featureCount; i++) {
+                int fx = r.featureXs[i], fy = r.featureYs[i];
+                for (int d = -2; d <= 2; d++) {
+                    int x = fx + d, y = fy;
+                    if (x >= 0 && x < gw && y >= 0 && y < gh)
+                        pixels[y * gw + x] = 0xFFFF4040;
+                    int x2 = fx, y2 = fy + d;
+                    if (x2 >= 0 && x2 < gw && y2 >= 0 && y2 < gh)
+                        pixels[y2 * gw + x2] = 0xFFFF4040;
+                }
+            }
+        }
+
+        try {
+            android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(
+                    gw, gh, android.graphics.Bitmap.Config.ARGB_8888);
+            bmp.setPixels(pixels, 0, gw, 0, 0, gw, gh);
+            int scale = 4;
+            android.graphics.Bitmap scaled = android.graphics.Bitmap.createScaledBitmap(
+                    bmp, gw * scale, gh * scale, false);  // nearest-neighbor
+            bmp.recycle();
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            scaled.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out);
+            scaled.recycle();
+            return out.toByteArray();
+        } catch (Throwable t) {
+            Log.e(TAG, "encodeDebugJpeg", t);
+            return null;
+        }
+    }
     private void processFrame(long timestamp) {
         try {
             OpticalFlowTracker.Result r = tracker.update(yPlane, previewWidth, previewHeight);
@@ -595,10 +726,18 @@ public class SensorService extends Service {
             if (config.invertDx) dx = -dx;
             if (config.invertDy) dy = -dy;
 
+            // >>> НАКОПЛЕНИЕ ПОЗИЦИИ (только когда трекер уверен)
+            if (r.valid) {
+                synchronized (positionLock) {
+                    posX += dx;
+                    posY += dy;
+                }
+            }
+
             double distance     = Math.hypot(dx, dy);
             double directionDeg = normalizeDeg(Math.toDegrees(Math.atan2(dy, dx)));
 
-            // 2. Формируем JSON
+            // 2. JSON
             JSONObject reading = new JSONObject();
             reading.put("seq", seq);
             reading.put("timestamp_ms", timestamp);
@@ -626,10 +765,15 @@ public class SensorService extends Service {
             shift.put("invert_dy",     config.invertDy);
             reading.put("shift", shift);
 
+            // >>> ПОЗИЦИЯ ОТ НУЛЯ
+            reading.put("position", positionJson());
+
             JSONObject q = new JSONObject();
-            q.put("blocks_used",  r.blocksUsed);
-            q.put("blocks_total", r.blocksTotal);
-            q.put("confidence",   round(r.confidence, 3));
+            q.put("blocks_used",           r.blocksUsed);
+            q.put("blocks_total",          r.blocksTotal);
+            q.put("blocks_passed_quality", r.blocksPassedQuality);
+            q.put("confidence",            round(r.confidence, 3));
+            q.put("feature_count",         r.featureCount);
             reading.put("quality", q);
 
             if (flashlight != null) {
@@ -643,16 +787,26 @@ public class SensorService extends Service {
 
             reading.put("proc_ms", round(r.processNs / 1e6, 2));
 
-            // 3. Решаем, публиковать или нет
+            synchronized (flowResultLock) { lastFlowResult = r; }
+
+            // 3. Решение о публикации
             boolean shouldPublish;
             String  reason;
 
-            if (!config.publishOnlyOnChange) {
-                shouldPublish = true; reason = "always";
+            // >>> forcePublish (после tare/reset) публикует даже при !valid
+            boolean forced = forcePublish;
+            if (forced) forcePublish = false;
+
+            if (forced) {
+                shouldPublish = true;  reason = "force";
+            } else if (!config.publishOnlyOnChange) {
+                shouldPublish = true;  reason = "always";
             } else if (lastPublishMs == 0L) {
-                shouldPublish = true; reason = "first";
+                shouldPublish = true;  reason = "first";
             } else if (!r.valid) {
                 shouldPublish = false; reason = "invalid";
+            } else if (r.confidence < 0.10) {
+                shouldPublish = false; reason = "low_confidence";
             } else {
                 boolean moved = Math.abs(dx) >= config.publishMotionThresholdPx
                         || Math.abs(dy) >= config.publishMotionThresholdPx
@@ -799,6 +953,25 @@ public class SensorService extends Service {
             o.put("publishHeartbeatMs",          config.publishHeartbeatMs);
             o.put("publishSeq",                  broadcaster.getPublishSeq());
             o.put("skippedReadings",             skippedReadings);
+
+            // === Optical flow: последний результат + активный конфиг ===
+            OpticalFlowTracker.Result lr;
+            synchronized (flowResultLock) { lr = lastFlowResult; }
+            if (lr != null) {
+                o.put("blocksPassedQuality", lr.blocksPassedQuality);
+                o.put("blocksUsed",          lr.blocksUsed);
+                o.put("blocksTotal",         lr.blocksTotal);
+                o.put("confidenceLast",      lr.confidence);
+                o.put("featureCount",        lr.featureCount);
+            }
+            o.put("flowMinVariance",       config.flowMinVariance);
+            o.put("flowMinGradient",       config.flowMinGradient);
+            o.put("flowSubpixel",          config.flowSubpixel);
+            o.put("flowTemporalSmoothing", config.flowTemporalSmoothing);
+            o.put("flowTemporalAlpha",     config.flowTemporalAlpha);
+            o.put("flowMaxMotionPx",       config.flowMaxMotionPx);
+            o.put("grayscaleOutput",       config.grayscaleOutput);
+            o.put("position", positionJson());
 
             boolean hasFrame;
             synchronized (snapshotLock) { hasFrame = (fullFrame != null); }

@@ -35,14 +35,9 @@
   .endpoints code{color:#adf;background:#0e1418;padding:2px 6px;border-radius:3px}
   .endpoints div{margin-bottom:2px}
   .services div{padding:3px 0;font-size:13px}
-
-  /* Большой блок подключения */
-  #mainUrlBox{
-    font-size:20px;color:#6cf;word-break:break-all;user-select:all;
-    padding:14px;background:#0e1418;border-radius:8px;
-    text-align:center;border:2px solid #248;letter-spacing:0.5px;
-    margin-bottom:10px;
-  }
+  #mainUrlBox{font-size:20px;color:#6cf;word-break:break-all;user-select:all;
+              padding:14px;background:#0e1418;border-radius:8px;text-align:center;
+              border:2px solid #248;letter-spacing:0.5px;margin-bottom:10px}
   #mainUrlBox.warn{color:#fa4;border-color:#fa4;font-size:14px;letter-spacing:normal}
   #copyStatus{color:#285;font-size:12px;margin-left:8px}
   .ipRow{display:flex;gap:12px;margin-top:10px}
@@ -67,37 +62,21 @@
 </header>
 <main>
 
-    <!-- ============================================================ -->
-    <!--  ГЛАВНЫЙ БЛОК: АДРЕС ДЛЯ ПОДКЛЮЧЕНИЯ                        -->
-    <!-- ============================================================ -->
     <div class="card">
         <h2>Подключение к устройству</h2>
         <p class="hint">Откройте этот адрес в браузере на другом устройстве в той же сети:</p>
-
         <div id="mainUrlBox" class="warn">Определение адреса…</div>
-
         <div style="text-align:center;margin-bottom:8px">
             <button onclick="copyUrl('mainUrlBox')">Копировать адрес</button>
             <span id="copyStatus"></span>
         </div>
-
         <div class="ipRow">
-            <div class="kv">
-                <div class="k">IP-адрес</div>
-                <div class="v" id="ipText">—</div>
-            </div>
-            <div class="kv">
-                <div class="k">Активный порт</div>
-                <div class="v" id="portText">—</div>
-            </div>
+            <div class="kv"><div class="k">IP-адрес</div><div class="v" id="ipText">—</div></div>
+            <div class="kv"><div class="k">Активный порт</div><div class="v" id="portText">—</div></div>
         </div>
-
         <div id="warnBlock" class="warn" style="display:none"></div>
-
         <div class="diagnostics" id="diagnostics" style="display:none">
-            <div style="color:#adf;margin-bottom:4px">
-                Сетевые интерфейсы, которые видит сервер:
-            </div>
+            <div style="color:#adf;margin-bottom:4px">Сетевые интерфейсы, которые видит сервер:</div>
             <div id="ifaceList">—</div>
             <div style="color:#8aa;margin-top:6px;font-size:11px">
                 Если в списке только <code>rmnet*</code> / <code>ccmni*</code> — Wi-Fi
@@ -109,54 +88,33 @@
         </div>
     </div>
 
-    <!-- ============================================================ -->
-    <!--  АДРЕСА ДЛЯ КАЖДОГО ПРОТОКОЛА                               -->
-    <!-- ============================================================ -->
     <div class="card">
         <h2>Адреса для разных протоколов</h2>
         <p class="hint">Для подключения клиентов, скриптов, пультов</p>
-
-        <div class="row">
-            <label>HTTP:</label>
-            <div class="val"><input readonly id="urlHttp"></div>
-            <button onclick="copyUrl('urlHttp')">Копировать</button>
-        </div>
-        <div class="row">
-            <label>SSE:</label>
-            <div class="val"><input readonly id="urlSse"></div>
-            <button onclick="copyUrl('urlSse')">Копировать</button>
-        </div>
-        <div class="row">
-            <label>WS:</label>
-            <div class="val"><input readonly id="urlWs"></div>
-            <button onclick="copyUrl('urlWs')">Копировать</button>
-        </div>
-        <div class="row">
-            <label>Telnet:</label>
-            <div class="val"><input readonly id="urlTelnet"></div>
-            <button onclick="copyUrl('urlTelnet')">Копировать</button>
-        </div>
+        <div class="row"><label>HTTP:</label><div class="val"><input readonly id="urlHttp"></div><button onclick="copyUrl('urlHttp')">Копировать</button></div>
+        <div class="row"><label>SSE:</label><div class="val"><input readonly id="urlSse"></div><button onclick="copyUrl('urlSse')">Копировать</button></div>
+        <div class="row"><label>WS:</label><div class="val"><input readonly id="urlWs"></div><button onclick="copyUrl('urlWs')">Копировать</button></div>
+        <div class="row"><label>Telnet:</label><div class="val"><input readonly id="urlTelnet"></div><button onclick="copyUrl('urlTelnet')">Копировать</button></div>
     </div>
 
-    <!-- ============================================================ -->
-    <!--  СОСТОЯНИЕ СЕРВИСОВ                                        -->
-    <!-- ============================================================ -->
     <div class="card">
         <h2>Состояние сервисов</h2>
         <div class="services" id="services">—</div>
     </div>
 
-    <!-- ============================================================ -->
-    <!--  REST API                                                  -->
-    <!-- ============================================================ -->
     <div class="card">
         <h2>REST API</h2>
         <div class="endpoints">
             <div><code>GET  /api/sensor/last</code> — последнее измерение (JSON)</div>
             <div><code>GET  /api/sensor/status</code> — статус сервиса и фонарика</div>
             <div><code>GET  /api/sensor/sse</code> — поток (Server-Sent Events)</div>
+            <div><code>GET  /api/sensor/snapshot.jpg</code> — одиночный JPEG-кадр</div>
+            <div><code>GET  /api/sensor/stream.mjpg</code> — MJPEG-поток</div>
+            <div><code>GET  /api/sensor/debug.jpg</code> — grayscale-картинка с фичами optical flow</div>
             <div><code>POST /api/sensor/start</code> — запустить трансляцию</div>
             <div><code>POST /api/sensor/stop</code> — остановить трансляцию</div>
+            <div><code>POST /api/sensor/zero</code> — <b>установить текущее положение как ноль отсчёта</b></div>
+            <div><code>POST /api/sensor/reset</code> — <b>сбросить накопленную позицию и ноль</b></div>
             <div><code>POST /api/sensor/flashlight</code> — {"mode":"off|on|auto","threshold":50}</div>
             <div><code>GET / POST /api/sensor/config</code> — настройки (Basic admin/admin)</div>
         </div>
@@ -167,39 +125,22 @@
 (function() {
   var $ = function(id){ return document.getElementById(id); };
 
-  // ------------------------------------------------------------
-  // Копирование содержимого input / div
-  // ------------------------------------------------------------
   function legacyCopy(text) {
     var tmp = document.createElement('textarea');
-    tmp.value = text;
-    tmp.style.position = 'fixed';
-    tmp.style.left = '-9999px';
-    document.body.appendChild(tmp);
-    tmp.select();
+    tmp.value = text; tmp.style.position = 'fixed'; tmp.style.left = '-9999px';
+    document.body.appendChild(tmp); tmp.select();
     try { document.execCommand('copy'); } catch (e) {}
     document.body.removeChild(tmp);
   }
-
   function copyUrl(id) {
     var el = $(id);
     if (!el) return;
     var text = (el.tagName === 'INPUT') ? el.value : (el.textContent || el.innerText);
     if (!text || text === '—') return;
-
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(function() {
-        flashCopied();
-      }).catch(function() {
-        legacyCopy(text);
-        flashCopied();
-      });
-    } else {
-      legacyCopy(text);
-      flashCopied();
-    }
+      navigator.clipboard.writeText(text).then(flashCopied, function(){ legacyCopy(text); flashCopied(); });
+    } else { legacyCopy(text); flashCopied(); }
   }
-
   function flashCopied() {
     var s = $('copyStatus');
     if (!s) return;
@@ -207,10 +148,7 @@
     setTimeout(function() { s.textContent = ''; }, 2000);
   }
 
-  // ------------------------------------------------------------
-  // Проверка, пригоден ли IP для LAN
-  // ------------------------------------------------------------
- function isValidLanIp(ip) {
+  function isValidLanIp(ip) {
     if (!ip) return false;
     if (ip === '127.0.0.1') return false;
     if (ip === 'localhost') return false;
@@ -220,21 +158,14 @@
     return true;
   }
 
-  // ------------------------------------------------------------
-  // Главная отрисовка
-  // ------------------------------------------------------------
-   function renderStatus(st) {
+  function renderStatus(st) {
     var serverIp    = st.localIp || '';
     var browserHost = location.hostname || '';
     var port        = st.httpPortActive || st.httpPort || 8080;
 
-    // Приоритет: serverIp → browserHost (если не 127.0.0.1)
     var displayIp = null;
-    if (isValidLanIp(serverIp)) {
-      displayIp = serverIp;
-    } else if (isValidLanIp(browserHost)) {
-      displayIp = browserHost;
-    }
+    if (isValidLanIp(serverIp)) displayIp = serverIp;
+    else if (isValidLanIp(browserHost)) displayIp = browserHost;
 
     var box = $('mainUrlBox');
     if (displayIp) {
@@ -245,11 +176,9 @@
     } else {
       box.textContent = 'IP-адрес не определён';
       box.className = 'warn';
-
       $('warnBlock').style.display = '';
       $('warnBlock').innerHTML =
           'Не удалось определить LAN-адрес. Список интерфейсов ниже — что видит сервер.';
-
       var ips = st.localIps || [];
       if (ips.length === 0) {
         $('ifaceList').textContent = '(нет ни одного активного IPv4-интерфейса)';
@@ -280,37 +209,31 @@
       $('urlHttp').value = $('urlSse').value = $('urlWs').value = $('urlTelnet').value = '—';
     }
 
-    // ... ниже — блок statusJson для «Состояние сервисов» и REST API как было
     var html = '';
-    html += '<div>HTTP (REST+SSE): '
-         + pill(st.httpActive ? 'ON' : 'OFF', !!st.httpActive)
+    html += '<div>HTTP (REST+SSE): ' + pill(st.httpActive ? 'ON' : 'OFF', !!st.httpActive)
          + ' порт ' + (st.httpPortActive || st.httpPort || 8080) + '</div>';
-    html += '<div>WebSocket: '
-         + pill(st.wsActive ? 'ON' : 'OFF', !!st.wsActive)
+    html += '<div>WebSocket: ' + pill(st.wsActive ? 'ON' : 'OFF', !!st.wsActive)
          + ' порт ' + (st.wsPort > 0 ? st.wsPort : '—')
          + (st.wsClients ? ' • клиентов: ' + st.wsClients : '') + '</div>';
-    html += '<div>Telnet: '
-         + pill(st.telnetActive ? 'ON' : 'OFF', !!st.telnetActive)
+    html += '<div>Telnet: ' + pill(st.telnetActive ? 'ON' : 'OFF', !!st.telnetActive)
          + ' порт ' + (st.telnetPort > 0 ? st.telnetPort : '—')
          + (st.telnetClients ? ' • клиентов: ' + st.telnetClients : '') + '</div>';
-    html += '<div>Датчик: '
-         + pill(st.sensorRunning ? 'RUNNING' : 'STOPPED', !!st.sensorRunning)
-         + (st.previewWidth ? ' • кадр ' + st.previewWidth + '×' + st.previewHeight : '')
-         + '</div>';
+    html += '<div>Датчик: ' + pill(st.sensorRunning ? 'RUNNING' : 'STOPPED', !!st.sensorRunning)
+         + (st.previewWidth ? ' • кадр ' + st.previewWidth + '×' + st.previewHeight : '') + '</div>';
     html += '<div>Подписчиков на поток: ' + (st.subscribers || 0) + '</div>';
-    html += '<div>Клиентский режим (push): '
-         + (st.clientEnabled ? 'включён' : 'выключен') + '</div>';
-
+    html += '<div>Клиентский режим (push): ' + (st.clientEnabled ? 'включён' : 'выключен') + '</div>';
+    if (st.position) {
+      html += '<div>Позиция от нуля: X=' + (st.position.x_px).toFixed(2)
+           + ', Y=' + (st.position.y_px).toFixed(2)
+           + ', dist=' + (st.position.distance_from_zero_px).toFixed(2) + ' px</div>';
+    }
     if (st.flashlight) {
       var f = st.flashlight;
       var txt;
-      if (!f.available) {
-        txt = 'недоступен';
-      } else {
+      if (!f.available) { txt = 'недоступен'; }
+      else {
         txt = 'режим ' + f.mode + (f.on ? ' • ON' : ' • OFF');
-        if (typeof f.lux === 'number' && f.lux >= 0) {
-          txt += ' • ' + f.lux.toFixed(0) + ' lx';
-        }
+        if (typeof f.lux === 'number' && f.lux >= 0) txt += ' • ' + f.lux.toFixed(0) + ' lx';
       }
       html += '<div>Фонарик: ' + txt + '</div>';
     }
@@ -321,16 +244,12 @@
     return '<span class="pill ' + (on ? 'on' : 'off') + '">' + text + '</span>';
   }
 
-  // ------------------------------------------------------------
-  // Polling статуса
-  // ------------------------------------------------------------
   function refresh() {
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '/api/sensor/status', true);
     xhr.onload = function() {
       if (xhr.status !== 200) return;
-      try { renderStatus(JSON.parse(xhr.responseText)); }
-      catch (e) {}
+      try { renderStatus(JSON.parse(xhr.responseText)); } catch (e) {}
     };
     xhr.onerror = function() {
       var box = $('mainUrlBox');
@@ -343,7 +262,6 @@
   }
 
   window.copyUrl = copyUrl;
-
   refresh();
   setInterval(refresh, 2000);
 })();

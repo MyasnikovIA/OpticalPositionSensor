@@ -32,6 +32,7 @@
   pre{white-space:pre-wrap;word-break:break-all;background:#0e1418;padding:8px;
       border-radius:6px;font-size:11px;max-height:220px;overflow:auto;color:#8aa}
   .hint{color:#8aa;font-size:11px;margin-top:4px}
+  .hint a{color:#6cf}
   .warn{color:#fca;font-size:12px;margin-top:6px;background:#221408;
         padding:6px 8px;border-radius:4px;border-left:3px solid #fa4}
 </style>
@@ -47,24 +48,19 @@
 </header>
 <main>
 
-    <!-- ============== Авторизация ============== -->
     <div class="card">
         <h2>Авторизация</h2>
-        <label>Логин</label>
-        <input id="user" value="admin">
-        <label>Пароль</label>
-        <input id="pass" type="password" value="admin">
+        <label>Логин</label><input id="user" value="admin">
+        <label>Пароль</label><input id="pass" type="password" value="admin">
         <div class="hint">По умолчанию: admin / admin</div>
     </div>
 
-    <!-- ============== Основное ============== -->
     <div class="card">
         <h2>Основное</h2>
         <label class="inline"><input type="checkbox" id="enabled"> Датчик включён</label>
         <label class="inline"><input type="checkbox" id="autoStart"> Запускать автоматически при старте</label>
     </div>
 
-    <!-- ============== Серверы ============== -->
     <div class="card">
         <h2>Серверы (принимать подключения)</h2>
         <div class="row">
@@ -82,7 +78,6 @@
         <div class="hint">Изменение WS / Telnet портов применяется после полного перезапуска приложения.</div>
     </div>
 
-    <!-- ============== Клиентский режим (push) ============== -->
     <div class="card">
         <h2>Клиентский режим (отправка данных на сервер)</h2>
         <label class="inline"><input type="checkbox" id="clientEnabled"> Включить отправку на удалённый сервер</label>
@@ -92,17 +87,12 @@
             <option value="ws">WebSocket</option>
             <option value="telnet">Telnet / TCP</option>
         </select>
-        <label>URL сервера</label>
-        <input id="clientServerUrl" placeholder="http://192.168.1.10:8080">
-        <label>Путь (для HTTP)</label>
-        <input id="clientPath" placeholder="/api/sensor/push">
-        <label>Bearer-токен (опционально)</label>
-        <input id="clientToken" placeholder="">
-        <label>Интервал отправки, мс</label>
-        <input id="clientIntervalMs" type="number" min="10" max="60000">
+        <label>URL сервера</label><input id="clientServerUrl" placeholder="http://192.168.1.10:8080">
+        <label>Путь (для HTTP)</label><input id="clientPath" placeholder="/api/sensor/push">
+        <label>Bearer-токен (опционально)</label><input id="clientToken" placeholder="">
+        <label>Интервал отправки, мс</label><input id="clientIntervalMs" type="number" min="10" max="60000">
     </div>
 
-    <!-- ============== Фонарик ============== -->
     <div class="card">
         <h2>Фонарик</h2>
         <label>Режим фонарика</label>
@@ -116,20 +106,13 @@
         <div class="hint">Фонарик включается через режим TORCH камеры. На некоторых прошивках не поддерживается.</div>
     </div>
 
-    <!-- ============== Превью с камеры (MJPEG) ============== -->
     <div class="card">
         <h2>Превью с камеры (MJPEG)</h2>
         <label class="inline"><input type="checkbox" id="cameraPreviewEnabled">
             Включить превью (MJPEG / snapshot)</label>
         <div class="row">
-            <div>
-                <label>FPS</label>
-                <input id="cameraPreviewFps" type="number" min="1" max="15">
-            </div>
-            <div>
-                <label>Качество JPEG (10–95)</label>
-                <input id="cameraPreviewQuality" type="number" min="10" max="95">
-            </div>
+            <div><label>FPS</label><input id="cameraPreviewFps" type="number" min="1" max="15"></div>
+            <div><label>Качество JPEG (10–95)</label><input id="cameraPreviewQuality" type="number" min="10" max="95"></div>
         </div>
         <label>Поворот картинки с камеры</label>
         <select id="cameraPreviewRotation">
@@ -144,7 +127,6 @@
         </div>
     </div>
 
-    <!-- ============== Ориентация осей ============== -->
     <div class="card">
         <h2>Ориентация осей</h2>
         <div class="hint" style="margin-bottom:8px">
@@ -164,65 +146,75 @@
             Применяется к dx_px, dy_px, distance_px, direction_deg в JSON.
             Не влияет на картинку (для неё — параметр «Поворот картинки с камеры»).
         </div>
+        <div class="hint" style="margin-top:8px;color:#adf">
+            ⓘ Установка нуля отсчёта и сброс накопленной позиции —
+            на странице <a href="sensor.html" style="color:#6cf">Live</a>
+            (кнопки «Установить ноль здесь» / «Сбросить накопление»).
+        </div>
     </div>
 
-    <!-- ============== Фильтр публикации JSON ============== -->
     <div class="card">
         <h2>Публикация JSON</h2>
-        <label class="inline">
-            <input type="checkbox" id="publishOnlyOnChange">
-            Отправлять JSON только при изменении положения
-        </label>
+        <label class="inline"><input type="checkbox" id="publishOnlyOnChange">
+            Отправлять JSON только при изменении положения</label>
         <div class="row">
-            <div>
-                <label>Порог смещения, px (|dx| или |dy|)</label>
-                <input id="publishMotionThresholdPx" type="number" step="0.05" min="0" max="100">
-            </div>
-            <div>
-                <label>Порог поворота, °</label>
-                <input id="publishRotationThresholdDeg" type="number" step="0.01" min="0" max="180">
-            </div>
+            <div><label>Порог смещения, px (|dx| или |dy|)</label>
+                <input id="publishMotionThresholdPx" type="number" step="0.05" min="0" max="100"></div>
+            <div><label>Порог поворота, °</label>
+                <input id="publishRotationThresholdDeg" type="number" step="0.01" min="0" max="180"></div>
         </div>
         <label>Heartbeat, мс (0 = выключить)</label>
         <input id="publishHeartbeatMs" type="number" min="0" max="600000">
         <div class="hint">
             Изменения меньше указанных порогов считаются «шумом» и не публикуются.
-            Изменение фонарика и первый кадр публикуются всегда.
+            Изменение фонарика, первый кадр и ручной tare публикуются всегда.
             Heartbeat раз в N мс гарантирует, что клиент знает: связь жива.
         </div>
     </div>
 
-    <!-- ============== Параметры optical flow ============== -->
     <div class="card">
         <h2>Параметры оптического потока</h2>
         <div class="row">
-            <div>
-                <label>targetWidth, px</label>
-                <input id="targetWidth" type="number" min="32" max="512">
-            </div>
-            <div>
-                <label>searchRadius, px</label>
-                <input id="searchRadius" type="number" min="1" max="16">
-            </div>
-            <div>
-                <label>blockSize, px</label>
-                <input id="blockSize" type="number" min="4" max="32">
-            </div>
+            <div><label>targetWidth, px</label><input id="targetWidth" type="number" min="32" max="512"></div>
+            <div><label>searchRadius, px</label><input id="searchRadius" type="number" min="1" max="16"></div>
+            <div><label>blockSize, px</label><input id="blockSize" type="number" min="4" max="32"></div>
         </div>
         <div class="row">
-            <div>
-                <label>minContrast</label>
-                <input id="minContrast" type="number" min="0" max="64">
-            </div>
-            <div>
-                <label>maxSadPx</label>
-                <input id="maxSadPx" type="number" min="1" max="255">
-            </div>
+            <div><label>maxSadPx (порог SAD на пиксель)</label>
+                <input id="maxSadPx" type="number" min="1" max="255"></div>
         </div>
         <div class="hint">Изменение этих параметров применяется при следующем запуске камеры (Стоп → Старт).</div>
     </div>
 
-    <!-- ============== Смена логина/пароля ============== -->
+    <div class="card">
+        <h2>Шумоподавление Optical Flow</h2>
+        <div class="row">
+            <div><label>flowMinVariance (дисперсия блока)</label>
+                <input id="flowMinVariance" type="number" min="0" max="20000"></div>
+            <div><label>flowMinGradient (min(Σ|gx|,Σ|gy|))</label>
+                <input id="flowMinGradient" type="number" min="0" max="5000"></div>
+        </div>
+        <div class="row">
+            <div><label>flowTemporalAlpha (0.05–1.0)</label>
+                <input id="flowTemporalAlpha" type="number" step="0.05" min="0.05" max="1.0"></div>
+            <div><label>flowMaxMotionPx (motion gate)</label>
+                <input id="flowMaxMotionPx" type="number" step="1" min="1" max="500"></div>
+        </div>
+        <label class="inline"><input type="checkbox" id="flowSubpixel">
+            Субпиксельная интерполяция (парабола по SAD)</label>
+        <label class="inline"><input type="checkbox" id="flowTemporalSmoothing">
+            Временное сглаживание (EMA)</label>
+        <label class="inline"><input type="checkbox" id="grayscaleOutput">
+            Отдавать изображение в градациях серого (V=U=128)</label>
+        <div class="hint">
+            <b>Как тюнить:</b> ложные срабатывания в статике → ↑ flowMinVariance / ↑ flowMinGradient;
+            дрожание ±0.3px → ↓ flowTemporalAlpha до 0.4–0.5;
+            «плывёт» на быстрых движениях → ↑ flowTemporalAlpha до 0.8, ↑ searchRadius.<br>
+            Диагностика: <a href="/api/sensor/debug.jpg" target="_blank">/api/sensor/debug.jpg</a>
+            — grayscale-картинка (up ×4) с красными крестами на отобранных блоках.
+        </div>
+    </div>
+
     <div class="card">
         <h2>Сменить доступ к настройкам</h2>
         <label>Новый логин</label>
@@ -232,7 +224,6 @@
         <div class="hint">После смены перелогиньтесь на этой странице.</div>
     </div>
 
-    <!-- ============== Кнопки и вывод ============== -->
     <div class="card">
         <button onclick="loadCfg()">Загрузить</button>
         <button class="green" onclick="saveCfg()">Сохранить</button>
@@ -244,92 +235,71 @@
 <script>
 (function() {
   var $ = function(id){ return document.getElementById(id); };
+  function basicAuth() { return 'Basic ' + btoa($('user').value + ':' + $('pass').value); }
 
-  function basicAuth() {
-    return 'Basic ' + btoa($('user').value + ':' + $('pass').value);
-  }
-
-  // ------------------------------------------------------------
-  // Применение конфига к форме
-  // ------------------------------------------------------------
   function applyForm(c) {
     ['enabled', 'autoStart', 'restEnabled', 'sseEnabled', 'wsEnabled',
      'telnetEnabled', 'clientEnabled', 'cameraPreviewEnabled',
-     'publishOnlyOnChange', 'invertDx', 'invertDy']
+     'publishOnlyOnChange', 'invertDx', 'invertDy',
+     'flowSubpixel', 'flowTemporalSmoothing', 'grayscaleOutput']
       .forEach(function(k) {
-        if (k in c) {
-          var el = $(k);
-          if (el) el.checked = !!c[k];
-        }
+        if (k in c) { var el = $(k); if (el) el.checked = !!c[k]; }
       });
-
     ['httpPort', 'wsPort', 'telnetPort',
      'clientProtocol', 'clientServerUrl', 'clientPath', 'clientToken',
-     'clientIntervalMs',
-     'flashlightMode', 'lightThreshold',
+     'clientIntervalMs', 'flashlightMode', 'lightThreshold',
      'cameraPreviewFps', 'cameraPreviewQuality', 'cameraPreviewRotation',
-     'cameraMountRotationDeg',
-     'publishMotionThresholdPx', 'publishRotationThresholdDeg',
-     'publishHeartbeatMs',
-     'targetWidth', 'searchRadius', 'blockSize', 'minContrast', 'maxSadPx']
+     'cameraMountRotationDeg', 'publishMotionThresholdPx',
+     'publishRotationThresholdDeg', 'publishHeartbeatMs',
+     'targetWidth', 'searchRadius', 'blockSize', 'maxSadPx',
+     'flowMinVariance', 'flowMinGradient', 'flowTemporalAlpha', 'flowMaxMotionPx']
       .forEach(function(k) {
-        if (k in c) {
-          var el = $(k);
-          if (el) el.value = c[k];
-        }
+        if (k in c) { var el = $(k); if (el) el.value = c[k]; }
       });
   }
 
   function readForm() {
     var payload = {
-      enabled:         $('enabled').checked,
-      autoStart:       $('autoStart').checked,
-
-      restEnabled:     $('restEnabled').checked,
-      sseEnabled:      $('sseEnabled').checked,
-      wsEnabled:       $('wsEnabled').checked,
-      wsPort:          parseInt($('wsPort').value, 10) || 8090,
-      telnetEnabled:   $('telnetEnabled').checked,
-      telnetPort:      parseInt($('telnetPort').value, 10) || 8091,
-
-      clientEnabled:    $('clientEnabled').checked,
-      clientProtocol:   $('clientProtocol').value,
-      clientServerUrl:  $('clientServerUrl').value.trim(),
-      clientPath:       $('clientPath').value.trim() || '/api/sensor/push',
-      clientToken:      $('clientToken').value,
-      clientIntervalMs: parseInt($('clientIntervalMs').value, 10) || 100,
-
-      flashlightMode:  $('flashlightMode').value,
-      lightThreshold:  parseInt($('lightThreshold').value, 10) || 50,
-
-      cameraPreviewEnabled:  $('cameraPreviewEnabled').checked,
-      cameraPreviewFps:      parseInt($('cameraPreviewFps').value, 10) || 5,
-      cameraPreviewQuality:  parseInt($('cameraPreviewQuality').value, 10) || 50,
-      cameraPreviewRotation: parseInt($('cameraPreviewRotation').value, 10) || 0,
-
-      cameraMountRotationDeg: parseInt($('cameraMountRotationDeg').value, 10) || 0,
-      invertDx:               $('invertDx').checked,
-      invertDy:               $('invertDy').checked,
-
-      publishOnlyOnChange:         $('publishOnlyOnChange').checked,
-      publishMotionThresholdPx:    parseFloat($('publishMotionThresholdPx').value) || 0.4,
-      publishRotationThresholdDeg: parseFloat($('publishRotationThresholdDeg').value) || 0.2,
-      publishHeartbeatMs:          parseInt($('publishHeartbeatMs').value, 10) || 0,
-
-      targetWidth:     parseInt($('targetWidth').value, 10) || 112,
-      searchRadius:    parseInt($('searchRadius').value, 10) || 4,
-      blockSize:       parseInt($('blockSize').value, 10) || 8,
-      minContrast:     parseInt($('minContrast').value, 10) || 3,
-      maxSadPx:        parseInt($('maxSadPx').value, 10) || 18
+      enabled: $('enabled').checked, autoStart: $('autoStart').checked,
+      restEnabled: $('restEnabled').checked, sseEnabled: $('sseEnabled').checked,
+      wsEnabled: $('wsEnabled').checked, wsPort: parseInt($('wsPort').value,10)||8090,
+      telnetEnabled: $('telnetEnabled').checked, telnetPort: parseInt($('telnetPort').value,10)||8091,
+      clientEnabled: $('clientEnabled').checked, clientProtocol: $('clientProtocol').value,
+      clientServerUrl: $('clientServerUrl').value.trim(),
+      clientPath: $('clientPath').value.trim() || '/api/sensor/push',
+      clientToken: $('clientToken').value,
+      clientIntervalMs: parseInt($('clientIntervalMs').value,10)||100,
+      flashlightMode: $('flashlightMode').value,
+      lightThreshold: parseInt($('lightThreshold').value,10)||50,
+      cameraPreviewEnabled: $('cameraPreviewEnabled').checked,
+      cameraPreviewFps: parseInt($('cameraPreviewFps').value,10)||5,
+      cameraPreviewQuality: parseInt($('cameraPreviewQuality').value,10)||50,
+      cameraPreviewRotation: parseInt($('cameraPreviewRotation').value,10)||0,
+      cameraMountRotationDeg: parseInt($('cameraMountRotationDeg').value,10)||0,
+      invertDx: $('invertDx').checked, invertDy: $('invertDy').checked,
+      publishOnlyOnChange: $('publishOnlyOnChange').checked,
+      publishMotionThresholdPx: parseFloat($('publishMotionThresholdPx').value)||0.4,
+      publishRotationThresholdDeg: parseFloat($('publishRotationThresholdDeg').value)||0.2,
+      publishHeartbeatMs: parseInt($('publishHeartbeatMs').value,10)||0,
+      targetWidth: parseInt($('targetWidth').value,10)||112,
+      searchRadius: parseInt($('searchRadius').value,10)||4,
+      blockSize: parseInt($('blockSize').value,10)||8,
+      maxSadPx: parseInt($('maxSadPx').value,10)||18,
+      flowMinVariance: parseInt($('flowMinVariance').value,10),
+      flowMinGradient: parseInt($('flowMinGradient').value,10),
+      flowSubpixel: $('flowSubpixel').checked,
+      flowTemporalSmoothing: $('flowTemporalSmoothing').checked,
+      flowTemporalAlpha: parseFloat($('flowTemporalAlpha').value)||0.6,
+      flowMaxMotionPx: parseFloat($('flowMaxMotionPx').value)||40.0,
+      grayscaleOutput: $('grayscaleOutput').checked
     };
+    if (isNaN(payload.flowMinVariance)) payload.flowMinVariance = 400;
+    if (isNaN(payload.flowMinGradient)) payload.flowMinGradient = 120;
     var httpPort = parseInt($('httpPort').value, 10);
     if (httpPort > 0) payload.httpPort = httpPort;
     return payload;
   }
 
-  // ------------------------------------------------------------
-  // Загрузка конфига
-  // ------------------------------------------------------------
   function loadCfg() {
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '/api/sensor/config', true);
@@ -357,15 +327,10 @@
     xhr.send();
   }
 
-  // ------------------------------------------------------------
-  // Сохранение конфига
-  // ------------------------------------------------------------
   function saveCfg() {
     var payload = readForm();
-
     var nu = $('newUser').value; if (nu) payload.configUser = nu;
     var np = $('newPass').value; if (np) payload.configPass = np;
-
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/sensor/config', true);
     xhr.setRequestHeader('Authorization', basicAuth());
@@ -383,11 +348,10 @@
         if (typeof j.httpPortActive === 'number' && j.config.httpPort !== j.httpPortActive) {
           txt += '\n\n⚠ HTTP-порт в конфиге (' + j.config.httpPort
               + ') отличается от работающего (' + j.httpPortActive
-              + '). Нажмите «Применить HTTP-порт и перезапустить», чтобы переключиться.';
+              + '). Нажмите «Применить HTTP-порт и перезапустить».';
         }
         $('out').textContent = txt;
-        $('newUser').value = '';
-        $('newPass').value = '';
+        $('newUser').value = ''; $('newPass').value = '';
         if (nu) $('user').value = nu;
         if (np) $('pass').value = np;
         loadCfg();
@@ -399,9 +363,6 @@
     xhr.send(JSON.stringify(payload));
   }
 
-  // ------------------------------------------------------------
-  // Перезапуск камеры
-  // ------------------------------------------------------------
   function restartSensor() {
     var x1 = new XMLHttpRequest();
     x1.open('POST', '/api/sensor/stop', true);
@@ -419,9 +380,6 @@
     x1.send();
   }
 
-  // ------------------------------------------------------------
-  // Применить HTTP-порт и перезапустить сервер
-  // ------------------------------------------------------------
   function applyHttpPort() {
     var newPort = parseInt($('httpPort').value, 10);
     if (!newPort || newPort < 1 || newPort > 65535) {
@@ -431,15 +389,11 @@
     }
     if (!confirm('Перезапустить HTTP-сервер на порту ' + newPort + '?\n'
                + 'Текущая страница станет недоступна на старом порту.')) return;
-
     $('portWarn').style.display = 'none';
-
-    // 1) сохранить конфиг
     var savePayload = readForm();
     savePayload.httpPort = newPort;
     var nu = $('newUser').value; if (nu) savePayload.configUser = nu;
     var np = $('newPass').value; if (np) savePayload.configPass = np;
-
     var x1 = new XMLHttpRequest();
     x1.open('POST', '/api/sensor/config', true);
     x1.setRequestHeader('Authorization', basicAuth());
@@ -450,7 +404,6 @@
         $('portWarn').textContent = 'Ошибка сохранения конфига: HTTP ' + x1.status;
         return;
       }
-      // 2) перезапустить HTTP на новом порту
       var x2 = new XMLHttpRequest();
       x2.open('POST', '/api/sensor/restart-http', true);
       x2.setRequestHeader('Authorization', basicAuth());
@@ -461,15 +414,11 @@
           $('portWarn').textContent = 'Ошибка перезапуска: HTTP ' + x2.status;
           return;
         }
-        var j = {};
-        try { j = JSON.parse(x2.responseText); } catch (e) {}
-
         $('portWarn').style.display = '';
         $('portWarn').className = 'hint';
         $('portWarn').textContent =
             'Перезапуск… Переход на http://' + location.hostname + ':'
             + newPort + '/config.html через 2.5 сек.';
-
         setTimeout(function() {
           location.href = location.protocol + '//' + location.hostname + ':'
                        + newPort + '/config.html';
@@ -488,11 +437,8 @@
     x1.send(JSON.stringify(savePayload));
   }
 
-  window.loadCfg       = loadCfg;
-  window.saveCfg       = saveCfg;
-  window.restartSensor = restartSensor;
-  window.applyHttpPort = applyHttpPort;
-
+  window.loadCfg = loadCfg; window.saveCfg = saveCfg;
+  window.restartSensor = restartSensor; window.applyHttpPort = applyHttpPort;
   loadCfg();
 })();
 </script>

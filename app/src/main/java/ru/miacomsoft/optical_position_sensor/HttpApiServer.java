@@ -35,7 +35,9 @@ public class HttpApiServer {
         server.createContext("/api/sensor/stream.mjpg",  new SnapshotHandler(svc.getSnapshotProvider()));
         server.createContext("/api/sensor/",             new RestHandler(svc));
         server.createContext("/",                        new StaticHandler(context));
-
+        server.createContext("/api/sensor/snapshot.jpg", new SnapshotHandler(svc.getSnapshotProvider()));
+        server.createContext("/api/sensor/stream.mjpg",  new SnapshotHandler(svc.getSnapshotProvider()));
+        server.createContext("/api/sensor/debug.jpg", new SnapshotHandler(svc.getSnapshotProvider()));
         server.setExecutor(Executors.newFixedThreadPool(8));   // было 6
         server.start();
         Log.i(TAG, "Listening on " + host + ":" + port);
